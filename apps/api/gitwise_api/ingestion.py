@@ -21,6 +21,7 @@ MAX_TREE_ENTRIES = 2_000
 MAX_FILE_SIZE_BYTES = 1_000_000
 MAX_MANIFESTS_TO_READ = 40
 MAX_TOTAL_MANIFEST_BYTES = 5_000_000
+MAX_DEPENDENCY_FACTS = 1_000
 MANIFESTS = {
     "pyproject.toml": "python",
     "requirements.txt": "python",
@@ -210,6 +211,7 @@ class GitHubRepositoryClient:
             }
         )[:MAX_MANIFESTS_TO_READ]
         total_manifest_bytes = 0
+        dependency_facts_emitted = 0
         for path in manifest_paths:
             entry = blob_entries[path]
             if entry.size is None or entry.size > MAX_FILE_SIZE_BYTES:
@@ -222,7 +224,8 @@ class GitHubRepositoryClient:
             if not isinstance(encoded, str) or encoding != "base64":
                 continue
             try:
-                raw_content = base64.b64decode(encoded, validate=True)
+                compact_content = re.sub(r"\s+", "", encoded)
+                raw_content = base64.b64decode(compact_content, validate=True)
                 if len(raw_content) > MAX_FILE_SIZE_BYTES:
                     continue
                 text_content = raw_content.decode("utf-8")
@@ -312,6 +315,8 @@ class GitHubRepositoryClient:
                 continue
 
             for dependency in dependencies:
+                if dependency_facts_emitted >= MAX_DEPENDENCY_FACTS:
+                    break
                 facts.append(GenomeFact.observed(
                     repository=repository.full_name,
                     commit_sha=commit_sha,
@@ -323,6 +328,9 @@ class GitHubRepositoryClient:
                     ),
                     extraction_method="github_git_blob_manifest_parser",
                 ))
+                dependency_facts_emitted += 1
+            if dependency_facts_emitted >= MAX_DEPENDENCY_FACTS:
+                break
 
         blob_paths = {entry.path for entry in entries if entry.kind == "blob"}
         for manifest, ecosystem in MANIFESTS.items():
