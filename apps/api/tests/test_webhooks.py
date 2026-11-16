@@ -38,4 +38,4 @@ def test_requires_configured_secret() -> None:
 
 def test_requires_raw_bytes_payload() -> None:
     with pytest.raises(TypeError, match="raw request bytes"):
-        verify_github_webhook_signature("{}".encode().decode(), "sha256=" + "0" * 64, "secret")
+        verify_github_webhook_signature("{}".strip(), "sha256=" + "0" * 64, "secret")
