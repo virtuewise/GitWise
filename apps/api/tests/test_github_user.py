@@ -93,5 +93,5 @@ def test_rejects_invalid_user_identity_and_installation_membership() -> None:
 
 
 def test_requires_session_managed_access_token() -> None:
-    with pytest.raises(ValueError, match="OAuth access token"):
+    with pytest.raises(ValueError, match="GitHub App user access token"):
         GitHubUserClient(" ")
