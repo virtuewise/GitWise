@@ -8,7 +8,13 @@ from fastapi import FastAPI, HTTPException, Request
 from gitwise_api.config import get_settings
 from gitwise_api.evolution import GenomeComparison, compare_genomes
 from gitwise_api.genome import SoftwareGenomeSnapshot
+from gitwise_api.github_app import GitHubAppClient
+from gitwise_api.github_installation_events import (
+    GitHubInstallationEventError,
+    process_installation_event,
+)
 from gitwise_api.ingestion import GitHubRepositoryClient
+from gitwise_api.installation_grants import InstallationGrantStore
 from gitwise_api.repositories import (
     RepositoryCompareRequest,
     RepositoryInspectRequest,
@@ -32,12 +38,20 @@ async def lifespan(application: FastAPI):
         if settings.database_url
         else None
     )
+    application.state.installation_grant_store = (
+        InstallationGrantStore.from_url(settings.database_url)
+        if settings.database_url
+        else None
+    )
     try:
         yield
     finally:
-        store = getattr(application.state, "webhook_delivery_store", None)
-        if store is not None:
-            await store.close()
+        delivery_store = getattr(application.state, "webhook_delivery_store", None)
+        grant_store = getattr(application.state, "installation_grant_store", None)
+        if delivery_store is not None:
+            await delivery_store.close()
+        if grant_store is not None:
+            await grant_store.close()
 
 
 settings = get_settings()
@@ -69,8 +83,8 @@ async def root() -> dict[str, str]:
 async def receive_github_webhook(request: Request) -> dict[str, str]:
     """Authenticate and durably deduplicate GitHub's ping handshake.
 
-    Other event types deliberately remain unsupported until their handlers can
-    verify App installation ownership and apply grant changes transactionally.
+    Installation lifecycle events are processed only after signature verification,
+    App ownership checks, and immutable repository identity verification.
     """
     secret = get_settings().github_webhook_secret
     delivery_store = getattr(request.app.state, "webhook_delivery_store", None)
@@ -95,7 +109,7 @@ async def receive_github_webhook(request: Request) -> dict[str, str]:
         raise HTTPException(status_code=401, detail="Invalid GitHub webhook signature.")
 
     event_name = request.headers.get("x-github-event", "")
-    if event_name != "ping":
+    if event_name not in ("ping", "installation", "installation_repositories"):
         raise HTTPException(
             status_code=501,
             detail="This GitHub webhook event is not supported yet.",
@@ -128,10 +142,52 @@ async def receive_github_webhook(request: Request) -> dict[str, str]:
     if result.outcome == "in_progress":
         return {"status": "in_progress", "event": event_name}
 
+    app_id = get_settings().github_app_id
+    private_key = get_settings().github_app_private_key
+    grant_store = getattr(request.app.state, "installation_grant_store", None)
+    if event_name != "ping" and (
+        app_id is None or not private_key or grant_store is None
+    ):
+        try:
+            await delivery_store.mark_failed(
+                delivery_id,
+                claim_token=result.claim_token,
+                error_code="app_not_configured",
+            )
+        except RuntimeError:
+            pass
+        raise HTTPException(
+            status_code=503,
+            detail="GitHub App lifecycle processing is not configured.",
+        )
+
+    github_app = (
+        GitHubAppClient(app_id=app_id, private_key=private_key)
+        if event_name != "ping"
+        else None
+    )
     try:
-        # The ping handshake has no domain side effects. Lifecycle handlers will
-        # complete their database effects before marking this delivery processed.
-        await delivery_store.mark_processed(delivery_id, claim_token=result.claim_token)
+        if event_name != "ping":
+            await process_installation_event(
+                event_name=event_name,
+                payload=decoded,
+                app_id=app_id,
+                app=github_app,
+                grants=grant_store,
+            )
+        await delivery_store.mark_processed(
+            delivery_id, claim_token=result.claim_token
+        )
+    except GitHubInstallationEventError as exc:
+        try:
+            await delivery_store.mark_failed(
+                delivery_id,
+                claim_token=result.claim_token,
+                error_code="invalid_installation_event",
+            )
+        except RuntimeError:
+            pass
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         try:
             await delivery_store.mark_failed(
@@ -145,6 +201,9 @@ async def receive_github_webhook(request: Request) -> dict[str, str]:
             status_code=503,
             detail="Webhook event processing failed and can be retried.",
         ) from exc
+    finally:
+        if github_app is not None:
+            await github_app.close()
 
     return {"status": "accepted", "event": event_name}
 
