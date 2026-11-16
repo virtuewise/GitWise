@@ -169,7 +169,10 @@ class GitHubAppClient:
         *,
         repositories: tuple[str, ...],
     ) -> GitHubInstallationToken:
-        body = {"repositories": list(repositories)}
+        body = {
+            "repositories": list(repositories),
+            "permissions": {"contents": "read", "metadata": "read"},
+        }
         response = await self._client.post(
             f"/app/installations/{installation_id}/access_tokens",
             headers={"Authorization": f"Bearer {self._app_jwt()}"},
@@ -376,6 +379,10 @@ class GitHubAppClient:
             or not isinstance(repository.get("full_name"), str)
             or repository["full_name"].casefold() != expected_full_name.casefold()
             or token.permissions.get("contents") != "read"
+            or any(
+                key not in ("contents", "metadata") or value != "read"
+                for key, value in token.permissions.items()
+            )
         ):
             raise GitHubAppAuthenticationError(
                 "The installation token does not prove the requested repository identity "
