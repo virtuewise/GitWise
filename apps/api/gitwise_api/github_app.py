@@ -22,6 +22,7 @@ class GitHubAppInstallation:
     account_login: str
     target_type: str
     repository_selection: str
+    suspended_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +95,7 @@ class GitHubAppClient:
             account_login = account["login"]
             target_type = payload["target_type"]
             repository_selection = payload["repository_selection"]
+            suspended_at = payload.get("suspended_at")
         except (KeyError, TypeError, ValueError) as exc:
             raise GitHubAppAuthenticationError(
                 "GitHub returned an invalid installation identity response."
@@ -110,10 +112,14 @@ class GitHubAppClient:
             or not account_login
             or target_type not in ("User", "Organization")
             or repository_selection not in ("all", "selected")
+            or (suspended_at is not None and not isinstance(suspended_at, str))
         ):
             raise GitHubAppAuthenticationError(
                 "The installation identity does not match the configured GitHub App."
             )
+
+        if suspended_at is not None:
+            raise GitHubAppAuthenticationError("The GitHub App installation is suspended.")
 
         return GitHubAppInstallation(
             installation_id=returned_installation_id,
@@ -122,6 +128,7 @@ class GitHubAppClient:
             account_login=account_login,
             target_type=target_type,
             repository_selection=repository_selection,
+            suspended_at=suspended_at,
         )
 
     async def create_installation_token(
