@@ -1,6 +1,11 @@
 from fastapi import FastAPI
 
 from gitwise_api.config import get_settings
+from gitwise_api.repositories import (
+    RepositoryInspectRequest,
+    RepositoryReference,
+    parse_github_repository_url,
+)
 
 settings = get_settings()
 
@@ -24,3 +29,15 @@ async def root() -> dict[str, str]:
         "message": "The intelligence layer for software development.",
         "docs": "/docs",
     }
+
+
+@app.post(
+    "/repositories/resolve",
+    response_model=RepositoryReference,
+    tags=["repositories"],
+)
+async def resolve_repository(
+    request: RepositoryInspectRequest,
+) -> RepositoryReference:
+    """Validate and normalize a GitHub repository URL; no repository data is fetched yet."""
+    return parse_github_repository_url(request.url)
