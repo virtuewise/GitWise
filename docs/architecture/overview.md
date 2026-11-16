@@ -67,6 +67,12 @@ The initial webhook security primitives live in `apps/api/gitwise_api/webhooks.p
 
 Verified delivery IDs can be claimed transactionally in PostgreSQL. The unique delivery key makes concurrent duplicate deliveries idempotent; reuse of the same delivery ID with a different event name or payload digest is treated as a conflict. Migration `0002_github_webhook_deliveries` creates the durable delivery ledger. The API now exposes `POST /webhooks/github` for the GitHub `ping` handshake only. It enforces a 1 MB body limit, verifies the raw-body signature before parsing JSON, and records delivery IDs in PostgreSQL. Duplicate ping deliveries are acknowledged without a second claim; conflicting reuse is rejected. Other event types return `501` until dedicated handlers can verify App installation ownership and apply grant changes transactionally. Operational retention policy remains outstanding. This endpoint is not yet a GitHub App installation lifecycle integration.
 
+## GitHub App installation identity
+
+`apps/api/gitwise_api/github_app.py` implements the App-authenticated identity boundary. It creates short-lived RS256 App JWTs, queries GitHub's App installation endpoint, and verifies that the returned installation ID and App ID match the configured credentials before minting an installation access token. Token creation can be scoped to an explicit repository-name allowlist; tokens are short-lived credentials and must remain in memory, never in logs or persistent storage.
+
+This client is not yet connected to webhook event dispatch or access-grant provisioning. Installation lifecycle events remain unsupported by the webhook route until the event's installation identity is checked through this App-authenticated client, repository membership is verified, and grant changes are applied transactionally with auditable revocation semantics.
+
 ## Proposed components
 
 - **Web client:** repository onboarding, project overview, evidence explorer.
