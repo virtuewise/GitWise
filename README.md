@@ -20,7 +20,7 @@ See [the detailed roadmap](docs/roadmap.md) for scope, acceptance goals, and del
 
 ## Current project status
 
-GitWise is at the foundation stage, building Phase 1. `POST /repositories/inspect` resolves a public GitHub repository and returns a bounded, commit-pinned Software Genome snapshot. Supply an optional `ref` to inspect a branch, tag, or commit. `POST /repositories/compare` accepts `base_ref` and `head_ref` and compares the two freshly ingested snapshots across supported Python architecture relationships and declared dependencies. The service statically parses selected files; it does not execute repository code. Snapshots are not yet exposed through the API. The repository includes PostgreSQL-backed immutable snapshot storage foundations, a grant-checked write path, GitHub webhook signature verification, durable delivery replay protection with retryable processing leases, and a narrowly scoped authenticated `ping` webhook endpoint. Verified GitHub App installation ownership, grant provisioning/revocation, tenant-isolated history APIs, and production database deployment remain unfinished.
+GitWise is at the foundation stage, building Phase 1. `POST /repositories/inspect` resolves a public GitHub repository and returns a bounded, commit-pinned Software Genome snapshot. Supply an optional `ref` to inspect a branch, tag, or commit. `POST /repositories/compare` accepts `base_ref` and `head_ref` and compares the two freshly ingested snapshots across supported Python architecture relationships and declared dependencies. The service statically parses selected files; it does not execute repository code. Snapshots are not yet exposed through the API. The repository includes PostgreSQL-backed immutable snapshot storage foundations, a grant-checked write path, GitHub webhook signature verification, durable delivery replay protection with retryable, fenced processing leases; verified GitHub App installation ownership; and one-repository token scope verification against immutable repository IDs. Verified GitHub App installation ownership, grant provisioning/revocation, tenant-isolated history APIs, and production database deployment remain unfinished.
 
 ## Product principles
 
@@ -67,6 +67,12 @@ Copy `.env.example` to `.env` and configure values as needed. Never commit token
 ## GitHub webhook endpoint
 
 Configure `GITWISE_GITHUB_WEBHOOK_SECRET` with the webhook secret from the GitHub App and configure `GITWISE_DATABASE_URL` with PostgreSQL. `POST /webhooks/github` verifies `X-Hub-Signature-256` against the original raw body, enforces a 1 MB request limit, and records GitHub `ping` deliveries with recoverable processing state. Concurrent deliveries receive an in-progress response, failed or expired processing leases can be retried, completed deliveries are acknowledged as duplicates, and conflicting reuse is rejected. Other event types deliberately return `501` until verified installation-ownership and grant-lifecycle handlers are implemented. Do not enable installation or repository permission events yet.
+
+## GitHub App identity foundation
+
+The GitHub App client authenticates with short-lived RS256 App JWTs, verifies that an installation belongs to the configured App, and can mint a token scoped to one repository. Before returning that token, it checks the installation account, the repository's immutable numeric ID and full name from GitHub's token response, and the explicit contents: read permission. A repository name supplied by an event is never treated as sufficient identity. This primitive is tested but is not yet wired into webhook lifecycle dispatch or grant provisioning; installation and repository permission events remain unsupported.
+
+Webhook delivery records now have explicit pending, processing, processed, and failed states, retry leases, attempt counts, and per-claim fencing tokens. Stale workers cannot complete a delivery after a newer claim has taken ownership. Lifecycle handlers must still make their database effects transactional with grant updates before marking deliveries processed.
 
 ## PostgreSQL snapshot storage
 
