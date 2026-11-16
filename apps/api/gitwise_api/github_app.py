@@ -250,8 +250,10 @@ class GitHubAppClient:
             not isinstance(access_token, str)
             or not access_token
             or not isinstance(token_permissions, dict)
-            or token_permissions.get("metadata") != "read"
-            or any(key != "metadata" for key in token_permissions)
+            or any(
+                key != "metadata" or value != "read"
+                for key, value in token_permissions.items()
+            )
         ):
             raise GitHubAppAuthenticationError(
                 "GitHub returned a token with an unexpected permission scope."
