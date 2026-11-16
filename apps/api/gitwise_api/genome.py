@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from hashlib import sha256
+import json
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -40,7 +41,18 @@ class GenomeFact(BaseModel):
         source_url: str | None = None,
         extraction_method: str = "github_repository_metadata",
     ) -> GenomeFact:
-        identity = f"{repository}:{commit_sha}:{fact_type}:{source_path or ''}:{value}"
+        identity = json.dumps(
+            {
+                "repository": repository,
+                "commit_sha": commit_sha.lower(),
+                "fact_type": fact_type,
+                "source_path": source_path,
+                "value": value,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
         return cls(
             fact_id=sha256(identity.encode("utf-8")).hexdigest(),
             fact_type=fact_type,
