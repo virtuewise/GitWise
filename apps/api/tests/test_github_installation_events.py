@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import asynccontextmanager
 
 import pytest
 from gitwise_api.github_app import GitHubAppInstallation, GitHubInstallationToken
@@ -23,7 +24,9 @@ class FakeGitHubApp:
         self.verified: list[int] = []
         self.scoped: list[tuple[int, str, str]] = []
 
-    async def verify_installation(self, installation_id: int) -> GitHubAppInstallation:
+    async def verify_installation(
+        self, installation_id: int, *, allow_suspended: bool = False
+    ) -> GitHubAppInstallation:
         self.verified.append(installation_id)
         return INSTALLATION
 
@@ -69,13 +72,9 @@ class FakeGrantStore:
         self.granted.append(tuple(item["id"] for item in repositories))
         return len(repositories)
 
-    async def apply_repository_changes(
-        self, installation, repositories_to_grant, repository_ids_to_revoke
-    ):
-        additions = tuple(item["id"] for item in repositories_to_grant)
-        removals = tuple(repository_ids_to_revoke)
-        self.atomic_changes.append((additions, removals))
-        return len(additions), len(removals)
+    @asynccontextmanager
+    async def installation_lock(self, installation_id):
+        yield
 
     async def reconcile_installation_repositories(self, installation, repositories):
         values = tuple(item["id"] for item in repositories)
@@ -115,10 +114,10 @@ def test_added_and_removed_repositories_use_verified_ids_and_atomic_grants() -> 
             app=app,
             grants=grants,
         )
-        assert result == "granted:1;revoked:1"
+        assert result == "reconciled:2;revoked:1"
         assert app.verified == [456]
-        assert app.scoped == [(9001, "acme", "api")]
-        assert grants.atomic_changes == [((9001,), (9002,))]
+        assert app.scoped == []
+        assert grants.reconciliations == [(9001, 9003)]
 
     asyncio.run(exercise())
 
