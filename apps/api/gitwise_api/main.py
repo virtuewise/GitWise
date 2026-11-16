@@ -5,6 +5,8 @@ from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Request
 
+from gitwise_api.auth import AuthComponents
+from gitwise_api.auth import router as auth_router
 from gitwise_api.config import get_settings
 from gitwise_api.evolution import GenomeComparison, compare_genomes
 from gitwise_api.genome import SoftwareGenomeSnapshot
@@ -13,6 +15,7 @@ from gitwise_api.github_installation_events import (
     GitHubInstallationEventError,
     process_installation_event,
 )
+from gitwise_api.github_oauth import GitHubOAuthClient
 from gitwise_api.ingestion import GitHubRepositoryClient
 from gitwise_api.installation_grants import InstallationGrantStore
 from gitwise_api.repositories import (
@@ -21,6 +24,8 @@ from gitwise_api.repositories import (
     RepositoryReference,
     parse_github_repository_url,
 )
+from gitwise_api.sessions import SessionStore
+from gitwise_api.token_crypto import TokenCipher
 from gitwise_api.webhook_deliveries import (
     GitHubWebhookDeliveryStore,
     WebhookDeliveryConflict,
@@ -28,6 +33,31 @@ from gitwise_api.webhook_deliveries import (
 from gitwise_api.webhooks import verify_github_webhook_signature
 
 MAX_WEBHOOK_BODY_BYTES = 1_000_000
+
+
+def _build_auth_components(settings) -> AuthComponents | None:
+    """Enable sign-in only when every credential it needs is configured."""
+    if not (
+        settings.database_url
+        and settings.token_encryption_keys
+        and settings.github_app_client_id
+        and settings.github_app_client_secret
+        and settings.public_base_url
+    ):
+        return None
+    base = settings.public_base_url.rstrip("/")
+    return AuthComponents(
+        sessions=SessionStore.from_url(
+            settings.database_url,
+            TokenCipher.from_setting(settings.token_encryption_keys.get_secret_value()),
+        ),
+        oauth=GitHubOAuthClient(
+            client_id=settings.github_app_client_id,
+            client_secret=settings.github_app_client_secret.get_secret_value(),
+            redirect_uri=f"{base}/auth/github/callback",
+        ),
+        public_base_url=base,
+    )
 
 
 @asynccontextmanager
@@ -43,9 +73,14 @@ async def lifespan(application: FastAPI):
         if settings.database_url
         else None
     )
+    application.state.auth_components = _build_auth_components(settings)
     try:
         yield
     finally:
+        auth = getattr(application.state, "auth_components", None)
+        if auth is not None:
+            await auth.sessions.close()
+            await auth.oauth.close()
         delivery_store = getattr(application.state, "webhook_delivery_store", None)
         grant_store = getattr(application.state, "installation_grant_store", None)
         if delivery_store is not None:
@@ -62,6 +97,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+app.include_router(auth_router)
 
 
 @app.get("/health", tags=["operations"])

@@ -86,6 +86,10 @@ alembic upgrade head
 
 The snapshot store remains separate from the webhook grant lifecycle. Its internal read methods enforce active grants, including reads through installation IDs returned by the verified GitHub user client. No GitHub App user authorization/session or authenticated API endpoint exposes historical snapshots yet; the API must obtain a GitWise App user access token from a server-managed session and derive principal identity from GitHub, never from request parameters. Do not create grants directly from unverified request data. Private-repository ingestion and historical Genome retrieval remain disabled until tenant-isolation authorization tests and authenticated user-to-installation ownership rules are implemented.
 
+## GitHub App user sign-in
+
+`GET /auth/github/login` starts the GitHub App authorization-code flow with PKCE and a single-use `state` that is also bound to the browser by a short-lived `HttpOnly` cookie. `GET /auth/github/callback` consumes the state atomically, exchanges the code on the server, asks GitHub to verify the user, and creates a server-side session. The browser only receives an opaque `HttpOnly`, `Secure`, `SameSite=Lax` session cookie and a readable CSRF cookie; GitHub tokens never leave the server and are stored encrypted (`GITWISE_TOKEN_ENCRYPTION_KEYS`, newest key first, so keys can be rotated). Sign-in always returns to `GITWISE_PUBLIC_BASE_URL`; the destination is never taken from the request. Sessions have idle and absolute expiry. `POST /auth/session/rotate`, `/auth/logout` and `/auth/logout/all` require the `X-CSRF-Token` header. Identity comes only from the session, never from request parameters. Sign-in is disabled unless the database, token keys, GitHub App client credentials and public base URL are all configured. Historical Genome retrieval remains unavailable until the authenticated endpoint and its authorization tests land.
+
 ## Security
 
 GitWise should request the narrowest GitHub App permissions possible. Do not send private repository contents to external model providers without clear user consent and an explicit data-handling policy.
