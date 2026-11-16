@@ -354,6 +354,7 @@ class GitHubRepositoryClient:
             if isinstance(item, dict)
             and isinstance(item.get("path"), str)
             and item["path"].endswith(".py")
+            and module_name_for_path(item["path"]) is not None
         ]
         python_discovered = len(python_tree_entries)
         python_candidates = sorted(
@@ -381,7 +382,7 @@ class GitHubRepositoryClient:
             for item in python_tree_entries
         ):
             architecture_limitations.add("python_file_size_or_metadata")
-        
+
         module_by_path = {
             entry.path: module_name_for_path(entry.path)
             for entry in python_sources
