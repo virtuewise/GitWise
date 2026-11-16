@@ -59,6 +59,7 @@ class RepositoryTreeEntry(BaseModel):
     kind: Literal["blob", "tree", "commit"]
     sha: str
     size: int | None = None
+    mode: str | None = None
 
 
 class SoftwareGenomeSnapshot(BaseModel):
