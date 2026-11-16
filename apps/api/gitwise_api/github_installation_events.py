@@ -71,12 +71,26 @@ async def _verify_repositories(
         full_name = candidate["full_name"]
         owner, repository_name = full_name.split("/", 1)
         repository_id = candidate["id"]
+        if owner.casefold() != installation.account_login.casefold():
+            raise GitHubInstallationEventError(
+                "Repository owner does not match the verified installation account."
+            )
         token = await app.create_repository_scoped_token(
             installation.installation_id,
             repository_id=repository_id,
             owner=owner,
             repository_name=repository_name,
         )
+        if (
+            len(token.repositories) != 1
+            or token.repositories[0].get("id") != repository_id
+            or token.repositories[0].get("full_name", "").casefold()
+            != f"{owner}/{repository_name}".casefold()
+            or token.permissions.get("contents") != "read"
+        ):
+            raise GitHubInstallationEventError(
+                "GitHub did not confirm the requested repository identity and read scope."
+            )
         verified.extend(token.repositories)
     return verified
 
