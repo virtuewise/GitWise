@@ -3,6 +3,7 @@ import pytest
 from gitwise_api import main
 from gitwise_api.genome import SoftwareGenomeSnapshot
 
+
 class FakeGitHubClient:
     def __init__(self) -> None:
         self.closed = False
