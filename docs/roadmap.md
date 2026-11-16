@@ -98,6 +98,6 @@ The immediate work is Phase 1: complete safe repository ingestion, build the Sof
 
 ## Current implementation status
 
-The repository now has a first deterministic Genome comparison engine for two supplied snapshots. It covers Python module/import graph differences and declared dependency differences, with tests for additions, removals, constraint changes, provenance, repository identity validation, and deterministic output.
+The repository now has a first deterministic Genome comparison engine for two supplied snapshots. It covers Python module/import graph differences and declared dependency differences, with tests for additions, removals, constraint changes, provenance, repository identity validation, and deterministic output. The API can inspect an explicit branch, tag, or commit and compare two refs through fresh, commit-pinned observations. Ingestion also enforces streamed upstream response-size limits and reports invalid Python source as a completeness limitation.
 
-This is not yet historical project memory: durable snapshot storage, historical commit/ref inspection, and an API for comparing stored snapshots remain future work. Those capabilities should be added only with explicit retention, access-control, and provenance guarantees.
+This is not yet historical project memory: snapshots are not persisted, comparisons re-fetch both refs, and there is no historical snapshot retrieval API. Durable storage and incremental history remain future work and must be introduced with explicit retention, access-control, idempotency, and provenance guarantees.
