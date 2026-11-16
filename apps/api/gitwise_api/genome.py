@@ -3,9 +3,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 import json
 from hashlib import sha256
-from typing import Any, Literal
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 
 class GenomeEvidence(BaseModel):
@@ -23,7 +23,7 @@ class GenomeFact(BaseModel):
     fact_id: str
     schema_version: Literal["1.0"] = "1.0"
     fact_type: str
-    value: Any
+    value: JsonValue
     evidence: list[GenomeEvidence] = Field(default_factory=list)
     confidence: float = Field(ge=0, le=1)
     verification_status: Literal["observed", "inferred"]
@@ -36,7 +36,7 @@ class GenomeFact(BaseModel):
         repository: str,
         commit_sha: str,
         fact_type: str,
-        value: Any,
+        value: JsonValue,
         source_path: str | None = None,
         source_url: str | None = None,
         extraction_method: str = "github_repository_metadata",
@@ -52,6 +52,7 @@ class GenomeFact(BaseModel):
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
+            allow_nan=False,
         )
         return cls(
             fact_id=sha256(identity.encode("utf-8")).hexdigest(),
