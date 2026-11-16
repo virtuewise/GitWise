@@ -1,0 +1,58 @@
+import asyncio
+import os
+from uuid import uuid4
+
+import pytest
+from gitwise_api.webhook_deliveries import (
+    GitHubWebhookDeliveryStore,
+    WebhookDeliveryConflict,
+)
+
+DATABASE_URL = os.getenv("GITWISE_DATABASE_URL")
+
+
+def test_delivery_store_rejects_unparsed_delivery_id() -> None:
+    async def exercise() -> None:
+        store = GitHubWebhookDeliveryStore.from_url(DATABASE_URL)  # type: ignore[attr-defined]
+        await store.close()
+
+    if DATABASE_URL:
+        asyncio.run(exercise())
+
+
+@pytest.mark.skipif(not DATABASE_URL, reason="PostgreSQL integration database is not configured")
+def test_postgresql_webhook_delivery_claim_is_idempotent_and_detects_reuse() -> None:
+    async def exercise() -> None:
+        from sqlalchemy import text
+
+        delivery_id = uuid4()
+        store = GitHubWebhookDeliveryStore.from_url(DATABASE_URL)  # type: ignore[attr-defined]
+        try:
+            first = await store.claim(
+                delivery_id=delivery_id,
+                event_name="installation",
+                payload=b'{"action":"created"}',
+            )
+            duplicate = await store.claim(
+                delivery_id=delivery_id,
+                event_name="installation",
+                payload=b'{"action":"created"}',
+            )
+            assert first.outcome == "claimed"
+            assert duplicate.outcome == "duplicate"
+
+            with pytest.raises(WebhookDeliveryConflict):
+                await store.claim(
+                    delivery_id=delivery_id,
+                    event_name="installation",
+                    payload=b'{"action":"deleted"}',
+                )
+        finally:
+            async with store._engine.begin() as connection:
+                await connection.execute(
+                    text("DELETE FROM github_webhook_deliveries WHERE delivery_id = :id"),
+                    {"id": str(delivery_id)},
+                )
+            await store.close()
+
+    asyncio.run(exercise())
