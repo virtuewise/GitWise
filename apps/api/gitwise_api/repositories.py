@@ -13,6 +13,13 @@ class RepositoryReference(BaseModel):
 
 class RepositoryInspectRequest(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
+    ref: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class RepositoryCompareRequest(BaseModel):
+    url: str = Field(min_length=1, max_length=2048)
+    base_ref: str = Field(min_length=1, max_length=255)
+    head_ref: str = Field(min_length=1, max_length=255)
 
 
 def parse_github_repository_url(url: str) -> RepositoryReference:
