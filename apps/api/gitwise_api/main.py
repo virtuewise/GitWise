@@ -123,10 +123,26 @@ async def receive_github_webhook(request: Request) -> dict[str, str]:
     except WebhookDeliveryConflict as exc:
         raise HTTPException(status_code=409, detail="Conflicting webhook delivery ID.") from exc
 
-    return {
-        "status": "accepted" if result.outcome == "claimed" else "duplicate",
-        "event": event_name,
-    }
+    if result.outcome == "duplicate":
+        return {"status": "duplicate", "event": event_name}
+    if result.outcome == "in_progress":
+        return {"status": "in_progress", "event": event_name}
+
+    try:
+        # The ping handshake has no domain side effects. Lifecycle handlers will
+        # complete their database effects before marking this delivery processed.
+        await delivery_store.mark_processed(delivery_id)
+    except Exception as exc:
+        try:
+            await delivery_store.mark_failed(delivery_id, error_code="handler_failure")
+        except RuntimeError:
+            pass
+        raise HTTPException(
+            status_code=503,
+            detail="Webhook event processing failed and can be retried.",
+        ) from exc
+
+    return {"status": "accepted", "event": event_name}
 
 
 @app.post(
