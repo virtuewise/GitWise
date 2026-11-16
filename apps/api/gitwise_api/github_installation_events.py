@@ -116,6 +116,8 @@ async def process_installation_event(
             return f"granted:{count}"
         return "verified:0"
 
+    if action not in ("added", "removed"):
+        raise GitHubInstallationEventError("Unsupported installation repository action.")
     installation = await app.verify_installation(installation_id)
     added = _repository_candidates(payload.get("repositories_added", []))
     removed = _repository_candidates(payload.get("repositories_removed", []))
