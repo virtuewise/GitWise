@@ -15,7 +15,6 @@ from gitwise_api.repositories import (
     RepositoryReference,
     parse_github_repository_url,
 )
-from gitwise_api.storage import GenomeSnapshotStore
 from gitwise_api.webhook_deliveries import (
     GitHubWebhookDeliveryStore,
     WebhookDeliveryConflict,
@@ -33,18 +32,12 @@ async def lifespan(application: FastAPI):
         if settings.database_url
         else None
     )
-    application.state.genome_snapshot_store = (
-        GenomeSnapshotStore.from_url(settings.database_url)
-        if settings.database_url
-        else None
-    )
     try:
         yield
     finally:
-        for attribute in ("webhook_delivery_store", "genome_snapshot_store"):
-            store = getattr(application.state, attribute, None)
-            if store is not None:
-                await store.close()
+        store = getattr(application.state, "webhook_delivery_store", None)
+        if store is not None:
+            await store.close()
 
 
 settings = get_settings()
