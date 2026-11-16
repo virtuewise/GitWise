@@ -65,7 +65,7 @@ The public comparison endpoint currently performs fresh ingestion for each reque
 
 The initial webhook security primitives live in `apps/api/gitwise_api/webhooks.py` and `apps/api/gitwise_api/webhook_deliveries.py`. Signature verification uses GitHub's SHA-256 HMAC header, the configured secret, the original raw request bytes, and constant-time comparison. It must run before JSON parsing or trusting event metadata.
 
-Verified delivery IDs can be claimed transactionally in PostgreSQL. The unique delivery key makes concurrent duplicate deliveries idempotent; reuse of the same delivery ID with a different event name or payload digest is treated as a conflict. Migration `0002_github_webhook_deliveries` creates the durable delivery ledger. These are security primitives, not yet a complete webhook endpoint: event dispatch, installation ownership verification, grant provisioning/revocation, and operational retention policy remain outstanding. Do not grant access or process installation lifecycle events until those handlers are implemented and tested.
+Verified delivery IDs can be claimed transactionally in PostgreSQL. The unique delivery key makes concurrent duplicate deliveries idempotent; reuse of the same delivery ID with a different event name or payload digest is treated as a conflict. Migration `0002_github_webhook_deliveries` creates the durable delivery ledger. The API now exposes `POST /webhooks/github` for the GitHub `ping` handshake only. It enforces a 1 MB body limit, verifies the raw-body signature before parsing JSON, and records delivery IDs in PostgreSQL. Duplicate ping deliveries are acknowledged without a second claim; conflicting reuse is rejected. Other event types return `501` until dedicated handlers can verify App installation ownership and apply grant changes transactionally. Operational retention policy remains outstanding. This endpoint is not yet a GitHub App installation lifecycle integration.
 
 ## Proposed components
 
@@ -90,7 +90,7 @@ Verified delivery IDs can be claimed transactionally in PostgreSQL. The unique d
 
 1. **Completed:** enforce upstream response-size limits, including streamed bodies without trustworthy `Content-Length` headers.
 2. **Completed:** treat invalid or unparseable Python source as an explicit architecture-analysis limitation rather than silently reporting a complete graph.
-3. **Initial persistence foundation:** capture GitHub's immutable repository ID; define backend-neutral snapshot keys and canonical content digests; add PostgreSQL migrations and a transactional grant-checked store. **Next:** implement verified identity/installation grant provisioning, revocation, and tenant-isolation tests before exposing history.
+3. **Initial persistence foundation:** capture GitHub's immutable repository ID; define backend-neutral snapshot keys and canonical content digests; add PostgreSQL migrations and a transactional grant-checked store. **Next:** implement GitHub App JWT authentication and verified installation ownership, grant provisioning/revocation, and tenant-isolation tests before exposing history.
 4. Add incremental refresh and efficient comparison over stored observations.
 5. Expand conservative architecture analysis beyond Python, with explicit per-language completeness.
 6. Build evidence navigation and project overview workflows on top of the stable Genome API.
