@@ -11,22 +11,13 @@ from gitwise_api.webhook_deliveries import (
 DATABASE_URL = os.getenv("GITWISE_DATABASE_URL")
 
 
-def test_delivery_store_rejects_unparsed_delivery_id() -> None:
-    async def exercise() -> None:
-        store = GitHubWebhookDeliveryStore.from_url(DATABASE_URL)  # type: ignore[attr-defined]
-        await store.close()
-
-    if DATABASE_URL:
-        asyncio.run(exercise())
-
-
 @pytest.mark.skipif(not DATABASE_URL, reason="PostgreSQL integration database is not configured")
 def test_postgresql_webhook_delivery_claim_is_idempotent_and_detects_reuse() -> None:
     async def exercise() -> None:
         from sqlalchemy import text
 
         delivery_id = uuid4()
-        store = GitHubWebhookDeliveryStore.from_url(DATABASE_URL)  # type: ignore[attr-defined]
+        store = GitHubWebhookDeliveryStore.from_url(DATABASE_URL)
         try:
             first = await store.claim(
                 delivery_id=delivery_id,
