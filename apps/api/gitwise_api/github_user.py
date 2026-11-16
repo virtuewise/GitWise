@@ -45,12 +45,11 @@ class GitHubUserClient:
                 "Authorization": f"Bearer {access_token}",
             },
         )
-        if client is not None:
-            self._client.headers.update({"Authorization": f"Bearer {access_token}"})
+        self._headers = {"Authorization": f"Bearer {access_token}"}
         self._owns_client = client is None
 
     async def verify_user(self) -> VerifiedGitHubUser:
-        response = await self._client.get("/user")
+        response = await self._client.get("/user", headers=self._headers)
         if response.status_code != 200:
             raise GitHubUserAuthenticationError(
                 "GitHub did not verify the authenticated user."
@@ -78,6 +77,7 @@ class GitHubUserClient:
             installations_response = await self._client.get(
                 "/user/installations",
                 params={"per_page": 100, "page": page},
+                headers=self._headers,
             )
             if installations_response.status_code != 200:
                 raise GitHubUserAuthenticationError(
