@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from contextlib import asynccontextmanager
 from typing import Any
 
 from gitwise_api.github_app import GitHubAppClient
