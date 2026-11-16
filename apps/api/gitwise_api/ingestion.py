@@ -141,7 +141,9 @@ class GitHubRepositoryClient:
             if kind not in {"blob", "tree", "commit"}:
                 continue
             size = item.get("size")
-            if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size < 0):
+            if size is not None and (
+                not isinstance(size, int) or isinstance(size, bool) or size < 0
+            ):
                 continue
             if kind == "blob" and size is not None and size > MAX_FILE_SIZE_BYTES:
                 continue
