@@ -421,3 +421,24 @@ async def test_invalid_python_syntax_makes_architecture_analysis_partial() -> No
     assert snapshot.architecture_analysis.files_selected == 1
     assert snapshot.architecture_analysis.files_analyzed == 0
     assert "invalid_python_syntax" in snapshot.architecture_analysis.limitations
+
+
+@pytest.mark.anyio
+async def test_github_response_body_is_capped_even_without_trustworthy_content_length() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b'{"payload":"' + b"x" * 100 + b'"}',
+            headers={"Content-Length": "1"},
+        )
+
+    async with httpx.AsyncClient(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        service = GitHubRepositoryClient(http_client)
+        with pytest.raises(HTTPException) as error:
+            await service._get("/oversized", max_response_bytes=32)
+
+    assert error.value.status_code == 502
+    assert "size limit" in error.value.detail
