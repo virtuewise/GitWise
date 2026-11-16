@@ -325,3 +325,42 @@ async def test_inspect_marks_architecture_partial_when_blob_provenance_is_incons
     assert snapshot.architecture_analysis.files_selected == 1
     assert snapshot.architecture_analysis.files_analyzed == 0
     assert "python_blob_size_mismatch" in snapshot.architecture_analysis.limitations
+
+
+@pytest.mark.anyio
+async def test_inspect_resolves_an_explicit_commit_ref() -> None:
+    responses = {
+        "/repos/acme/widget": {
+            "default_branch": "main",
+            "description": None,
+            "language": "Python",
+            "private": False,
+            "visibility": "public",
+        },
+        "/repos/acme/widget/commits/oldercommit123": {
+            "sha": "oldercommit123",
+            "commit": {"tree": {"sha": "oldertree123"}},
+        },
+        "/repos/acme/widget/git/trees/oldertree123": {
+            "truncated": False,
+            "tree": [],
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=responses[request.url.path])
+
+    async with httpx.AsyncClient(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        service = GitHubRepositoryClient(http_client)
+        snapshot = await service.inspect(
+            parse_github_repository_url("https://github.com/acme/widget"),
+            ref="oldercommit123",
+        )
+
+    assert snapshot.commit_sha == "oldercommit123"
+    assert snapshot.tree_sha == "oldertree123"
+    assert snapshot.requested_ref == "oldercommit123"
+    assert snapshot.architecture_analysis.status == "complete"
