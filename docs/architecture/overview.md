@@ -59,7 +59,7 @@ The comparison engine lives in `apps/api/gitwise_api/evolution.py`. It emits det
 
 Changes retain before/after values and the evidence available on each side. Import edges carry source-path and commit provenance. Commit SHA changes alone do not count as architectural changes.
 
-The public comparison endpoint currently performs fresh ingestion for each request. Snapshots are not persisted. The persistence contract is documented in [ADR 0001](decisions/0001-genome-persistence.md): immutable keys use provider repository ID, resolved commit SHA, and schema version; canonical digests exclude observation-time-only metadata; and tenant access grants remain separate from snapshot identity. The comparison engine does not claim runtime impact, compatibility, vulnerability, or causality.
+The public comparison endpoint currently performs fresh ingestion for each request. Historical retrieval is not exposed. The persistence contract is documented in [ADR 0001](decisions/0001-genome-persistence.md): immutable keys use provider repository ID, resolved commit SHA, and schema version; canonical digests exclude observation-time-only metadata; and tenant access grants remain separate from snapshot identity. The initial PostgreSQL migration (`apps/api/migrations/versions/0001_genome_history.py`) creates provider repository, revocable principal grant, and immutable snapshot tables. `GenomeSnapshotStore` requires an active write/admin grant, performs transactional insert-if-absent, and rejects digest conflicts. Snapshot rows reject updates at the database layer. Grant provisioning and authenticated API integration are intentionally not implemented yet; the store must only receive principal identities established by a verified authentication flow. The comparison engine does not claim runtime impact, compatibility, vulnerability, or causality.
 
 ## Proposed components
 
@@ -84,7 +84,7 @@ The public comparison endpoint currently performs fresh ingestion for each reque
 
 1. **Completed:** enforce upstream response-size limits, including streamed bodies without trustworthy `Content-Length` headers.
 2. **Completed:** treat invalid or unparseable Python source as an explicit architecture-analysis limitation rather than silently reporting a complete graph.
-3. **Completed foundation:** capture GitHub's immutable repository ID and define backend-neutral snapshot keys and canonical content digests. **Next:** implement transactional PostgreSQL storage with access-grant enforcement.
+3. **Initial persistence foundation:** capture GitHub's immutable repository ID; define backend-neutral snapshot keys and canonical content digests; add PostgreSQL migrations and a transactional grant-checked store. **Next:** implement verified identity/installation grant provisioning, revocation, and tenant-isolation tests before exposing history.
 4. Add incremental refresh and efficient comparison over stored observations.
 5. Expand conservative architecture analysis beyond Python, with explicit per-language completeness.
 6. Build evidence navigation and project overview workflows on top of the stable Genome API.
