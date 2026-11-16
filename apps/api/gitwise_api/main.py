@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import FastAPI
 
 from gitwise_api.config import get_settings
@@ -72,7 +74,7 @@ async def compare_repository_refs(request: RepositoryCompareRequest) -> GenomeCo
     repository = parse_github_repository_url(request.url)
     github = GitHubRepositoryClient()
     try:
-        base, head = await __import__("asyncio").gather(
+        base, head = await asyncio.gather(
             github.inspect(repository, request.base_ref),
             github.inspect(repository, request.head_ref),
         )
