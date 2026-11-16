@@ -11,10 +11,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str | None = None
     github_webhook_secret: str | None = None
+    github_app_id: int | None = None
+    github_app_private_key: str | None = None
 
     model_config = SettingsConfigDict(
         env_prefix="GITWISE_",
         env_file=".env",
+        env_ignore_empty=True,
         extra="ignore",
     )
 
