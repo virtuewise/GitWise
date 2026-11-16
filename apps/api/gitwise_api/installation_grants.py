@@ -8,6 +8,7 @@ never treats webhook payload fields or user-supplied principal IDs as identity.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import asynccontextmanager
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -33,6 +34,26 @@ class InstallationGrantStore:
 
     async def close(self) -> None:
         await self._engine.dispose()
+
+    @asynccontextmanager
+    async def installation_lock(self, installation_id: int):
+        """Serialize lifecycle reconciliation for one installation across workers."""
+        self._validate_installation_id(installation_id)
+        lock_key = f"gitwise-installation:{installation_id}"
+        async with self._engine.connect() as connection:
+            await connection.execute(
+                text("SELECT pg_advisory_lock(hashtextextended(:lock_key, 0))"),
+                {"lock_key": lock_key},
+            )
+            await connection.commit()
+            try:
+                yield
+            finally:
+                await connection.execute(
+                    text("SELECT pg_advisory_unlock(hashtextextended(:lock_key, 0))"),
+                    {"lock_key": lock_key},
+                )
+                await connection.commit()
 
     async def grant_repositories(
         self,
