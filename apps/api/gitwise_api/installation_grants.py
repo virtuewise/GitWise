@@ -52,6 +52,7 @@ class InstallationGrantStore:
             or type(installation.account_id) is not int
             or installation.account_id < 1
             or not isinstance(installation.account_login, str)
+            or not isinstance(installation.account_login, str)
             or not installation.account_login
         ):
             raise InstallationGrantError("Verified installation identity is required.")
