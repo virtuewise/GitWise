@@ -122,13 +122,13 @@ async def process_installation_event(
             return f"revoked:{await grants.revoke_installation(installation_id)}"
         if action not in ("created", "unsuspend"):
             raise GitHubInstallationEventError("Unsupported installation action.")
-        installation = await app.verify_installation(installation_id)
-        candidates = _repository_candidates(payload.get("repositories", []))
-        verified = await _verify_repositories(app, installation, candidates)
-        if verified:
-            count = await grants.grant_repositories(installation, verified)
-            return f"granted:{count}"
-        return "verified:0"
+        installation, current_repositories = await app.list_installation_repositories(
+            installation_id
+        )
+        granted, revoked = await grants.reconcile_installation_repositories(
+            installation, current_repositories
+        )
+        return f"reconciled:{granted};revoked:{revoked}"
 
     if action not in ("added", "removed"):
         raise GitHubInstallationEventError("Unsupported installation repository action.")
