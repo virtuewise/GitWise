@@ -199,3 +199,21 @@ def test_rejects_duplicate_or_malformed_repository_ids() -> None:
                 )
 
     asyncio.run(exercise())
+
+def test_rejects_unknown_installation_repository_action() -> None:
+    async def exercise() -> None:
+        with pytest.raises(
+            GitHubInstallationEventError, match="Unsupported installation repository action"
+        ):
+            await process_installation_event(
+                event_name="installation_repositories",
+                payload={
+                    "action": "edited",
+                    "installation": {"id": 456, "app_id": 123},
+                },
+                app_id=123,
+                app=FakeGitHubApp(),
+                grants=FakeGrantStore(),
+            )
+
+    asyncio.run(exercise())
