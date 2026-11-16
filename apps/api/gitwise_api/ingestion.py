@@ -108,7 +108,11 @@ class GitHubRepositoryClient:
             )
         return payload
 
-    async def inspect(self, repository: RepositoryReference) -> SoftwareGenomeSnapshot:
+    async def inspect(
+        self,
+        repository: RepositoryReference,
+        ref: str | None = None,
+    ) -> SoftwareGenomeSnapshot:
         encoded_owner = quote(repository.owner, safe="")
         encoded_name = quote(repository.name, safe="")
         base = f"/repos/{encoded_owner}/{encoded_name}"
@@ -117,10 +121,19 @@ class GitHubRepositoryClient:
         if not isinstance(default_branch, str) or not default_branch:
             raise HTTPException(status_code=502, detail="GitHub repository metadata is incomplete.")
 
-        branch = await self._get(f"{base}/branches/{quote(default_branch, safe='')}")
-        commit = branch.get("commit")
+        if ref is None:
+            ref_payload = await self._get(
+                f"{base}/branches/{quote(default_branch, safe='')}"
+            )
+            commit = ref_payload.get("commit")
+        else:
+            ref_payload = await self._get(
+                f"{base}/commits/{quote(ref, safe='')}"
+            )
+            commit = ref_payload
+
         if not isinstance(commit, dict):
-            raise HTTPException(status_code=502, detail="GitHub returned an invalid branch commit.")
+            raise HTTPException(status_code=502, detail="GitHub returned an invalid commit ref.")
         commit_details = commit.get("commit")
         tree = commit_details.get("tree") if isinstance(commit_details, dict) else None
         commit_sha = commit.get("sha")
@@ -128,7 +141,7 @@ class GitHubRepositoryClient:
         if not isinstance(commit_sha, str) or not isinstance(tree_sha, str):
             raise HTTPException(
                 status_code=502,
-                detail="GitHub did not provide a valid branch commit.",
+                detail="GitHub did not provide a valid commit for the requested ref.",
             )
 
         tree_payload = await self._get(
@@ -519,6 +532,7 @@ class GitHubRepositoryClient:
             repository_url=repository.canonical_url,
             description=description,
             default_branch=default_branch,
+            requested_ref=ref or default_branch,
             commit_sha=commit_sha,
             tree_sha=tree_sha,
             primary_language=language,
