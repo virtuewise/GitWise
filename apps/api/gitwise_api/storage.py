@@ -72,15 +72,15 @@ class GenomeSnapshotStore:
                 text("""
                     SELECT snapshot.payload
                     FROM software_genome_snapshots AS snapshot
-                    JOIN repository_access_grants AS grant
-                      ON grant.provider = snapshot.provider
-                     AND grant.provider_repository_id = snapshot.provider_repository_id
+                    JOIN repository_access_grants AS access_grant
+                      ON access_grant.provider = snapshot.provider
+                     AND access_access_grant.provider_repository_id = snapshot.provider_repository_id
                     WHERE snapshot.snapshot_key = :snapshot_key
-                      AND grant.principal_type = :principal_type
-                      AND grant.principal_id = :principal_id
-                      AND grant.revoked_at IS NULL
-                      AND grant.permission IN ('read', 'write', 'admin')
-                    FOR SHARE OF grant
+                      AND access_grant.principal_type = :principal_type
+                      AND access_grant.principal_id = :principal_id
+                      AND access_grant.revoked_at IS NULL
+                      AND access_grant.permission IN ('read', 'write', 'admin')
+                    FOR SHARE OF access_grant
                 """),
                 {
                     "snapshot_key": snapshot_key,
