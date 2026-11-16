@@ -212,6 +212,16 @@ class GitHubAppClient:
             raise GitHubAppAuthenticationError(
                 "GitHub returned an invalid installation token response."
             )
+        if (
+            permissions.get("contents") != "read"
+            or any(
+                key not in ("contents", "metadata") or value != "read"
+                for key, value in permissions.items()
+            )
+        ):
+            raise GitHubAppAuthenticationError(
+                "GitHub returned an installation token with an unexpected permission scope."
+            )
         return GitHubInstallationToken(
             token=token,
             expires_at=expires_at,
