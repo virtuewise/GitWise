@@ -34,6 +34,8 @@ A durable write must be insert-if-absent. If the key already exists, compare the
 
 ### 3. Keep snapshots immutable and schema-versioned
 
+- Genome fact values must be strict JSON values: objects with string keys, arrays, strings, finite numbers, booleans, or null. Reject Python-only values and non-finite numbers at the model/identity boundary rather than coercing them during persistence.
+
 - Never update a stored snapshot in place to represent a newer commit or schema.
 - A new commit or schema version creates a new snapshot record.
 - Preserve source commit, tree SHA, extraction method, source path/URL, confidence, verification state, and analysis limitations.
