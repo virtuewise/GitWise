@@ -74,7 +74,7 @@ class GenomeSnapshotStore:
                     FROM software_genome_snapshots AS snapshot
                     JOIN repository_access_grants AS access_grant
                       ON access_grant.provider = snapshot.provider
-                     AND access_access_grant.provider_repository_id = snapshot.provider_repository_id
+                     AND access_grant.provider_repository_id = snapshot.provider_repository_id
                     WHERE snapshot.snapshot_key = :snapshot_key
                       AND access_grant.principal_type = :principal_type
                       AND access_grant.principal_id = :principal_id
