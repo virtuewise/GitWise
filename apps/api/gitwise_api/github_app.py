@@ -168,7 +168,10 @@ class GitHubAppClient:
             or not repositories_payload
             or any(
                 not isinstance(item, dict)
+                or not isinstance(item.get("id"), int)
+                or item["id"] < 1
                 or not isinstance(item.get("full_name"), str)
+                or item["full_name"].count("/") != 1
                 or item["full_name"].rsplit("/", 1)[-1] not in repositories
                 for item in repositories_payload
             )
@@ -184,6 +187,52 @@ class GitHubAppClient:
                 item for item in repositories_payload if isinstance(item, dict)
             ),
         )
+
+    async def create_repository_scoped_token(
+        self,
+        installation_id: int,
+        *,
+        repository_id: int,
+        owner: str,
+        repository_name: str,
+    ) -> GitHubInstallationToken:
+        """Verify immutable repository membership and mint a one-repository token."""
+        if repository_id < 1:
+            raise ValueError("GitHub repository ID must be a positive integer.")
+        if (
+            not owner
+            or "/" in owner
+            or not repository_name
+            or "/" in repository_name
+        ):
+            raise ValueError("A valid GitHub owner and repository name are required.")
+
+        installation = await self.verify_installation(installation_id)
+        if installation.account_login.casefold() != owner.casefold():
+            raise GitHubAppAuthenticationError(
+                "The repository owner does not match the verified installation account."
+            )
+
+        token = await self.create_installation_token(
+            installation_id,
+            repositories=(repository_name,),
+        )
+        if len(token.repositories) != 1:
+            raise GitHubAppAuthenticationError(
+                "GitHub did not return exactly the requested repository."
+            )
+        repository = token.repositories[0]
+        expected_full_name = f"{owner}/{repository_name}"
+        if (
+            repository.get("id") != repository_id
+            or not isinstance(repository.get("full_name"), str)
+            or repository["full_name"].casefold() != expected_full_name.casefold()
+            or token.permissions.get("contents") != "read"
+        ):
+            raise GitHubAppAuthenticationError(
+                "The installation token does not prove the requested repository identity and read scope."
+            )
+        return token
 
     async def close(self) -> None:
         if self._owns_client:
