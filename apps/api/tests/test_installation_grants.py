@@ -48,8 +48,8 @@ def test_installation_grants_are_idempotent_and_isolated() -> None:
                     "private": False,
                 },
             ]
-            assert await store.grant_repositories(first, first_repositories) == 2
-            assert await store.grant_repositories(first, first_repositories) == 2
+            assert await store.apply_repository_changes(first, first_repositories, []) == (2, 0)
+            assert await store.apply_repository_changes(first, first_repositories, []) == (2, 0)
             assert (
                 await store.grant_repositories(
                     second,
@@ -58,11 +58,9 @@ def test_installation_grants_are_idempotent_and_isolated() -> None:
                 == 1
             )
 
-            revoked = await store.revoke_repositories(
-                first_installation_id,
-                [first_repository_id],
-            )
-            assert revoked == 1
+            assert await store.apply_repository_changes(
+                first, [], [first_repository_id]
+            ) == (0, 1)
 
             async with store._engine.connect() as connection:
                 active = await connection.execute(
