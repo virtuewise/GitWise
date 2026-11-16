@@ -118,7 +118,10 @@ class GitHubAppClient:
             or repository_selection not in ("all", "selected")
             or (suspended_at is not None and not isinstance(suspended_at, str))
             or not isinstance(permissions, dict)
-            or any(not isinstance(key, str) or not isinstance(value, str) for key, value in permissions.items())
+            or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in permissions.items()
+            )
         ):
             raise GitHubAppAuthenticationError(
                 "The installation identity does not match the configured GitHub App."
