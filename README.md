@@ -20,7 +20,7 @@ See [the detailed roadmap](docs/roadmap.md) for scope, acceptance goals, and del
 
 ## Current project status
 
-GitWise is at the foundation stage, beginning with Phase 1. The first vertical slice is a read-only repository intelligence service. `POST /repositories/inspect` resolves a public GitHub repository, pins analysis to its default-branch commit, reads a bounded Git tree, and returns a versioned Software Genome snapshot with evidence-linked facts. The service does not download or execute repository code.
+GitWise is at the foundation stage, building Phase 1. `POST /repositories/inspect` resolves a public GitHub repository and returns a bounded, commit-pinned Software Genome snapshot. Supply an optional `ref` to inspect a branch, tag, or commit. `POST /repositories/compare` accepts `base_ref` and `head_ref` and compares the two freshly ingested snapshots across supported Python architecture relationships and declared dependencies. The service statically parses selected files; it does not execute repository code. Snapshot persistence and durable project history are not implemented yet.
 
 ## Product principles
 
@@ -58,7 +58,7 @@ pip install -e ".[dev]"
 uvicorn gitwise_api.main:app --reload
 ```
 
-The API will be available at http://127.0.0.1:8000 and its OpenAPI docs at http://127.0.0.1:8000/docs. Use `POST /repositories/inspect` with `{"url":"https://github.com/owner/repository"}` to create a read-only Software Genome snapshot.
+The API will be available at http://127.0.0.1:8000 and its OpenAPI docs at http://127.0.0.1:8000/docs. Use `POST /repositories/inspect` with `{"url":"https://github.com/owner/repository","ref":"main"}` to create a read-only Software Genome snapshot. Use `POST /repositories/compare` with `{"url":"https://github.com/owner/repository","base_ref":"v1.0.0","head_ref":"main"}` to compare two refs.
 
 ## Configuration
 
