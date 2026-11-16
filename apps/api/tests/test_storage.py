@@ -209,6 +209,12 @@ def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability
                     principal_type="github_app_installation",
                     principal_id=installation_id,
                 )
+            with pytest.raises(SnapshotAccessDenied):
+                await store.get_snapshot(
+                    first.snapshot_key,
+                    principal_type="github_app_installation",
+                    principal_id=other_installation_id,
+                )
         finally:
             async with store._engine.begin() as connection:
                 await connection.execute(
