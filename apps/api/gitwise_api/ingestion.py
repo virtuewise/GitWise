@@ -104,16 +104,22 @@ class GitHubRepositoryClient:
             raise HTTPException(status_code=502, detail="GitHub repository metadata is incomplete.")
 
         branch = await self._get(f"{base}/branches/{quote(default_branch, safe='')}")
-        commit = branch.get("commit") or {}
+        commit = branch.get("commit")
+        if not isinstance(commit, dict):
+            raise HTTPException(status_code=502, detail="GitHub returned an invalid branch commit.")
+        commit_details = commit.get("commit")
+        tree = commit_details.get("tree") if isinstance(commit_details, dict) else None
         commit_sha = commit.get("sha")
-        tree_sha = (commit.get("commit") or {}).get("tree", {}).get("sha")
+        tree_sha = tree.get("sha") if isinstance(tree, dict) else None
         if not isinstance(commit_sha, str) or not isinstance(tree_sha, str):
             raise HTTPException(
                 status_code=502,
                 detail="GitHub did not provide a valid branch commit.",
             )
 
-        tree_payload = await self._get(f"{base}/git/trees/{quote(tree_sha, safe='')}")
+        tree_payload = await self._get(
+            f"{base}/git/trees/{quote(tree_sha, safe='')}?recursive=1"
+        )
         raw_tree = tree_payload.get("tree")
         if not isinstance(raw_tree, list):
             raise HTTPException(
@@ -128,14 +134,21 @@ class GitHubRepositoryClient:
             path = item.get("path")
             kind = item.get("type")
             sha = item.get("sha")
-            if not isinstance(path, str) or not isinstance(sha, str):
+            if not isinstance(path, str) or not path or path.startswith("/"):
+                continue
+            if "\\" in path or ".." in path.split("/") or not isinstance(sha, str):
                 continue
             if kind not in {"blob", "tree", "commit"}:
                 continue
             size = item.get("size")
-            if kind == "blob" and isinstance(size, int) and size > MAX_FILE_SIZE_BYTES:
+            if size is not None and (not isinstance(size, int) or isinstance(size, bool) or size < 0):
                 continue
-            entries.append(RepositoryTreeEntry(path=path, kind=kind, sha=sha, size=size))
+            if kind == "blob" and size is not None and size > MAX_FILE_SIZE_BYTES:
+                continue
+            mode = item.get("mode")
+            entries.append(
+                RepositoryTreeEntry(path=path, kind=kind, sha=sha, size=size, mode=mode)
+            )
 
         facts = [
             GenomeFact.observed(
