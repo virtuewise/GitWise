@@ -126,6 +126,12 @@ def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability
                 principal_id=installation_id,
             )
             assert installation_read.commit_sha == snapshot.commit_sha
+            overlapping_installation_read = await store.get_snapshot(
+                first.snapshot_key,
+                principal_type="github_app_installation",
+                principal_id=other_installation_id,
+            )
+            assert overlapping_installation_read.commit_sha == snapshot.commit_sha
             with pytest.raises(SnapshotAccessDenied):
                 await store.get_snapshot(
                     first.snapshot_key,
