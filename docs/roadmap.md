@@ -95,3 +95,9 @@ Build an open, interoperable ecosystem for software knowledge and trusted collab
 ## Current engineering focus
 
 The immediate work is Phase 1: complete safe repository ingestion, build the Software Genome foundation, generate architecture insights, preserve project memory, and deliver pull request intelligence. Later phases should build on this evidence-backed foundation rather than becoming separate disconnected products.
+
+## Current implementation status
+
+The repository now has a first deterministic Genome comparison engine for two supplied snapshots. It covers Python module/import graph differences and declared dependency differences, with tests for additions, removals, constraint changes, provenance, repository identity validation, and deterministic output.
+
+This is not yet historical project memory: durable snapshot storage, historical commit/ref inspection, and an API for comparing stored snapshots remain future work. Those capabilities should be added only with explicit retention, access-control, and provenance guarantees.
