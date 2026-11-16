@@ -364,3 +364,60 @@ async def test_inspect_resolves_an_explicit_commit_ref() -> None:
     assert snapshot.tree_sha == "oldertree123"
     assert snapshot.requested_ref == "oldercommit123"
     assert snapshot.architecture_analysis.status == "complete"
+
+
+@pytest.mark.anyio
+async def test_invalid_python_syntax_makes_architecture_analysis_partial() -> None:
+    import base64
+
+    source = b"def broken(:\n"
+    responses = {
+        "/repos/acme/widget": {
+            "default_branch": "main",
+            "description": None,
+            "language": "Python",
+            "private": False,
+            "visibility": "public",
+        },
+        "/repos/acme/widget/branches/main": {
+            "commit": {
+                "sha": "commitinvalid123",
+                "commit": {"tree": {"sha": "treeinvalid123"}},
+            }
+        },
+        "/repos/acme/widget/git/trees/treeinvalid123": {
+            "truncated": False,
+            "tree": [
+                {
+                    "path": "src/pkg/broken.py",
+                    "type": "blob",
+                    "sha": "brokenblob",
+                    "size": len(source),
+                    "mode": "100644",
+                }
+            ],
+        },
+        "/repos/acme/widget/git/blobs/brokenblob": {
+            "encoding": "base64",
+            "content": base64.b64encode(source).decode("ascii"),
+            "size": len(source),
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=responses[request.url.path])
+
+    async with httpx.AsyncClient(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        service = GitHubRepositoryClient(http_client)
+        snapshot = await service.inspect(
+            parse_github_repository_url("https://github.com/acme/widget")
+        )
+
+    assert snapshot.architecture_analysis.status == "partial"
+    assert snapshot.architecture_analysis.files_discovered == 1
+    assert snapshot.architecture_analysis.files_selected == 1
+    assert snapshot.architecture_analysis.files_analyzed == 0
+    assert "invalid_python_syntax" in snapshot.architecture_analysis.limitations
