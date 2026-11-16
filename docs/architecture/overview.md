@@ -6,14 +6,15 @@ Build a repository intelligence platform that creates a useful, continuously upd
 
 ## First milestone: repository snapshot
 
-The first vertical slice should:
+The first vertical slice is implemented as a read-only public-repository inspection path. It should:
 
 1. Accept a public GitHub repository URL.
 2. Validate and normalize the URL (allow only GitHub repository URLs; reject credentials, arbitrary hosts, and non-repository paths).
 3. Retrieve repository metadata and a bounded file tree through GitHub's API.
 4. Identify project manifests and documentation (for example README, pyproject.toml, package.json, go.mod, Cargo.toml).
-5. Produce a versioned, structured snapshot with evidence references.
-6. Expose the snapshot through the API.
+5. Pin the snapshot to the default-branch commit SHA.
+6. Produce a versioned Software Genome with evidence-linked observed facts.
+7. Expose the snapshot through `POST /repositories/inspect`.
 
 Private repositories will require a GitHub App installation and explicit authorization. Do not ask users to paste personal access tokens into the product.
 
@@ -28,7 +29,7 @@ Private repositories will require a GitHub App installation and explicit authori
 
 ## Software Genome record
 
-Each generated fact should carry:
+The initial schema lives in `apps/api/gitwise_api/genome.py`. Each generated fact should carry:
 
 - stable fact identifier and schema version
 - repository identity and analyzed commit SHA
@@ -38,6 +39,13 @@ Each generated fact should carry:
 - confidence / verification state
 
 Facts must be traceable to repository evidence. Avoid presenting inferred architecture as certainty.
+
+## Ingestion implementation boundaries
+
+- GitHub REST calls use explicit connect/request timeouts and map missing repositories, rate limits, and upstream failures to controlled API errors.
+- The initial tree response is capped at 2,000 entries; individual blobs above 1 MB are excluded from the analyzed tree inventory.
+- The current ingestion pass reads metadata and Git tree metadata only. It does not fetch file contents, follow symlinks, or execute repository code.
+- Facts are observed only when directly supported by GitHub metadata or a path in the commit-pinned tree. Architecture and dependency relationships remain future analysis stages.
 
 ## Security boundaries
 
