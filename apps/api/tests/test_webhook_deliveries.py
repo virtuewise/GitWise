@@ -24,13 +24,32 @@ def test_postgresql_webhook_delivery_claim_is_idempotent_and_detects_reuse() -> 
                 event_name="installation",
                 payload=b'{"action":"created"}',
             )
-            duplicate = await store.claim(
+            concurrent = await store.claim(
                 delivery_id=delivery_id,
                 event_name="installation",
                 payload=b'{"action":"created"}',
             )
             assert first.outcome == "claimed"
+            assert first.attempt_count == 1
+            assert concurrent.outcome == "in_progress"
+
+            await store.mark_failed(delivery_id, error_code="temporary_failure")
+            retry = await store.claim(
+                delivery_id=delivery_id,
+                event_name="installation",
+                payload=b'{"action":"created"}',
+            )
+            assert retry.outcome == "claimed"
+            assert retry.attempt_count == 2
+
+            await store.mark_processed(delivery_id)
+            duplicate = await store.claim(
+                delivery_id=delivery_id,
+                event_name="installation",
+                payload=b'{"action":"created"}',
+            )
             assert duplicate.outcome == "duplicate"
+            assert duplicate.attempt_count == 2
 
             with pytest.raises(WebhookDeliveryConflict):
                 await store.claim(
