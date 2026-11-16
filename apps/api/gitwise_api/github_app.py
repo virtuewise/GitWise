@@ -233,7 +233,8 @@ class GitHubAppClient:
             or token.permissions.get("contents") != "read"
         ):
             raise GitHubAppAuthenticationError(
-                "The installation token does not prove the requested repository identity and read scope."
+                "The installation token does not prove the requested repository identity "
+                "and read scope."
             )
         return token
 
