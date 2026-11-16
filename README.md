@@ -76,7 +76,7 @@ Webhook delivery records now have explicit pending, processing, processed, and f
 
 ## PostgreSQL snapshot storage
 
-The first persistence migration creates provider repository records, revocable GitHub-user/App-installation access grants, and immutable Software Genome snapshots. The transactional store requires an active `write` or `admin` grant and treats a repeated identical write as idempotent; a different digest for the same snapshot identity is a conflict.
+The first persistence migration creates provider repository records, revocable GitHub-user/App-installation access grants, and immutable Software Genome snapshots. The transactional store requires an active `write` or `admin` grant for writes and an active `read`, `write`, or `admin` grant for reads. Missing and unauthorized snapshots return the same access-denied result; reads lock the active grant against concurrent revocation. Repeated identical writes are idempotent; a different digest for the same snapshot identity is a conflict.
 
 Configure `GITWISE_DATABASE_URL` with a PostgreSQL `asyncpg` URL, then apply the schema with:
 
@@ -84,7 +84,7 @@ Configure `GITWISE_DATABASE_URL` with a PostgreSQL `asyncpg` URL, then apply the
 alembic upgrade head
 ```
 
-The snapshot store remains separate from the webhook grant lifecycle. No authenticated API endpoint exposes historical snapshots yet. Do not create grants directly from unverified request data. Private-repository ingestion and historical Genome retrieval remain disabled until tenant-isolation authorization tests and authenticated user-to-installation ownership rules are implemented.
+The snapshot store remains separate from the webhook grant lifecycle. Its internal read method enforces active grants, but no authenticated API endpoint exposes historical snapshots yet; the API must derive principal identity from a verified user-to-installation flow, never from request parameters. Do not create grants directly from unverified request data. Private-repository ingestion and historical Genome retrieval remain disabled until tenant-isolation authorization tests and authenticated user-to-installation ownership rules are implemented.
 
 ## Security
 
