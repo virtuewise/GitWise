@@ -60,6 +60,8 @@ class InstallationGrantStore:
 
         normalized: dict[int, tuple[str, str, bool]] = {}
         for repository in repositories:
+            if not isinstance(repository, dict):
+                raise InstallationGrantError("GitHub returned invalid repository metadata.")
             repository_id = repository.get("id")
             full_name = repository.get("full_name")
             is_private = repository.get("private", False)
