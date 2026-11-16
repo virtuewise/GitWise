@@ -105,3 +105,26 @@ def make_snapshot_with_fact(fact: GenomeFact) -> SoftwareGenomeSnapshot:
         is_private=False,
         facts=[fact],
     )
+
+
+def test_fact_values_reject_non_finite_numbers() -> None:
+    with pytest.raises(ValueError):
+        GenomeFact.observed(
+            repository="acme/widget",
+            commit_sha="ABCDEF1234567",
+            fact_type="configuration.threshold",
+            value=float("nan"),
+        )
+
+
+def test_fact_values_reject_non_json_python_objects() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        GenomeFact(
+            fact_id="fact",
+            fact_type="configuration.options",
+            value={"enabled": {1, 2}},
+            confidence=1.0,
+            verification_status="observed",
+        )
