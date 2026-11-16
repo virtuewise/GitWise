@@ -1,6 +1,6 @@
-from logging.config import fileConfig
 import asyncio
 import os
+from logging.config import fileConfig
 
 from alembic import context
 from sqlalchemy import pool
