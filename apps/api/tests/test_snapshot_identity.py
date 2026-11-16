@@ -68,3 +68,12 @@ def test_content_digest_is_independent_of_collection_order() -> None:
     second.facts = list(reversed(first.facts))
 
     assert snapshot_content_digest(first) == snapshot_content_digest(second)
+
+
+def test_content_digest_preserves_order_inside_fact_values() -> None:
+    first = make_snapshot(generated_at=datetime(2026, 1, 1, tzinfo=UTC))
+    second = make_snapshot(generated_at=datetime(2026, 1, 1, tzinfo=UTC))
+    first.facts[0].value = ["compile", "test", "package"]
+    second.facts[0].value = ["package", "test", "compile"]
+
+    assert snapshot_content_digest(first) != snapshot_content_digest(second)
