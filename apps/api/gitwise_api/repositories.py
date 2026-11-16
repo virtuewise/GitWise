@@ -1,7 +1,7 @@
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class RepositoryReference(BaseModel):
@@ -15,11 +15,27 @@ class RepositoryInspectRequest(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
     ref: str | None = Field(default=None, min_length=1, max_length=255)
 
+    @field_validator("ref")
+    @classmethod
+    def validate_ref(cls, value: str | None) -> str | None:
+        if value is not None and (
+            value != value.strip() or any(character.isspace() for character in value)
+        ):
+            raise ValueError("Git refs cannot contain whitespace.")
+        return value
+
 
 class RepositoryCompareRequest(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
     base_ref: str = Field(min_length=1, max_length=255)
     head_ref: str = Field(min_length=1, max_length=255)
+
+    @field_validator("base_ref", "head_ref")
+    @classmethod
+    def validate_refs(cls, value: str) -> str:
+        if value != value.strip() or any(character.isspace() for character in value):
+            raise ValueError("Git refs cannot contain whitespace.")
+        return value
 
 
 def parse_github_repository_url(url: str) -> RepositoryReference:
