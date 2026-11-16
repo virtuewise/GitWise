@@ -87,6 +87,7 @@ def test_added_and_removed_repositories_use_verified_ids_and_atomic_grants() -> 
             event_name="installation_repositories",
             payload={
                 "action": "added",
+                "repository_selection": "selected",
                 "installation": {"id": 456, "app_id": 123},
                 "repositories_added": [
                     {
@@ -249,6 +250,7 @@ def test_rejects_repository_identity_mismatch_from_token_exchange() -> None:
                 event_name="installation_repositories",
                 payload={
                     "action": "added",
+                    "repository_selection": "selected",
                     "installation": {"id": 456, "app_id": 123},
                     "repositories_added": [
                         {"id": 9001, "full_name": "acme/api"}
@@ -260,3 +262,27 @@ def test_rejects_repository_identity_mismatch_from_token_exchange() -> None:
             )
 
     asyncio.run(exercise())
+
+def test_all_to_selected_scope_change_revokes_old_grants_fail_closed() -> None:
+    async def exercise() -> None:
+        app = FakeGitHubApp()
+        grants = FakeGrantStore()
+        result = await process_installation_event(
+            event_name="installation_repositories",
+            payload={
+                "action": "removed",
+                "repository_selection": "selected",
+                "installation": {"id": 456, "app_id": 123},
+                "repositories_added": [],
+                "repositories_removed": [],
+            },
+            app_id=123,
+            app=app,
+            grants=grants,
+        )
+        assert result == "revoked:2"
+        assert grants.installation_revocations == [456]
+        assert grants.atomic_changes == []
+
+    asyncio.run(exercise())
+
