@@ -142,6 +142,16 @@ class GitHubAppClient:
         ):
             raise ValueError("A non-empty, unique repository scope is required.")
         await self.verify_installation(installation_id)
+        return await self._create_installation_token(
+            installation_id, repositories=repositories
+        )
+
+    async def _create_installation_token(
+        self,
+        installation_id: int,
+        *,
+        repositories: tuple[str, ...],
+    ) -> GitHubInstallationToken:
         body = {"repositories": list(repositories)}
         response = await self._client.post(
             f"/app/installations/{installation_id}/access_tokens",
@@ -216,7 +226,7 @@ class GitHubAppClient:
                 "The repository owner does not match the verified installation account."
             )
 
-        token = await self.create_installation_token(
+        token = await self._create_installation_token(
             installation_id,
             repositories=(repository_name,),
         )
