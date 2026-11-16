@@ -78,7 +78,6 @@ async def process_installation_event(
         return await _process_installation_event_locked(
             event_name=event_name,
             payload=payload,
-            app_id=app_id,
             installation_id=installation_id,
             app=app,
             grants=grants,
@@ -89,7 +88,6 @@ async def _process_installation_event_locked(
     *,
     event_name: str,
     payload: dict[str, Any],
-    app_id: int,
     installation_id: int,
     app: GitHubAppClient,
     grants: InstallationGrantStore,
