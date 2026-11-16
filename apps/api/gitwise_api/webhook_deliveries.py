@@ -1,9 +1,10 @@
-"""Durable idempotency primitives for verified GitHub webhook deliveries."""
+"""Durable, recoverable processing for verified GitHub webhook deliveries."""
 
 from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from datetime import timedelta
 from uuid import UUID
 
 from sqlalchemy import text
@@ -18,16 +19,18 @@ class WebhookDeliveryConflict(RuntimeError):
 class WebhookDeliveryResult:
     delivery_id: UUID
     outcome: str
+    attempt_count: int = 0
 
 
 class GitHubWebhookDeliveryStore:
-    """Atomically claim verified delivery IDs before dispatching their events.
+    """Claim verified deliveries with expiring leases and explicit completion.
 
-    Signature verification must happen before calling this store. A successful
-    claim is durable and unique across workers; duplicate deliveries are not
-    eligible for a second dispatch. Retention cleanup is an explicit operator
-    policy and must not run while deliveries are still within the replay window.
+    A delivery is not considered complete when first received. Workers must
+    call mark_processed only after all event effects commit, or mark_failed
+    after a recoverable failure. Expired processing leases can be reclaimed.
     """
+
+    LEASE_SECONDS = 300
 
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
@@ -57,13 +60,12 @@ class GitHubWebhookDeliveryStore:
 
         digest = hashlib.sha256(payload).hexdigest()
         async with self._engine.begin() as connection:
-            inserted = await connection.execute(
+            await connection.execute(
                 text("""
                     INSERT INTO github_webhook_deliveries (
                         delivery_id, event_name, payload_sha256
                     ) VALUES (:delivery_id, :event_name, :digest)
                     ON CONFLICT (delivery_id) DO NOTHING
-                    RETURNING delivery_id
                 """),
                 {
                     "delivery_id": str(delivery_id),
@@ -71,14 +73,13 @@ class GitHubWebhookDeliveryStore:
                     "digest": digest,
                 },
             )
-            if inserted.scalar_one_or_none() is not None:
-                return WebhookDeliveryResult(delivery_id, "claimed")
-
             existing = await connection.execute(
                 text("""
-                    SELECT event_name, payload_sha256
+                    SELECT event_name, payload_sha256, processing_status,
+                           attempt_count, lease_expires_at
                     FROM github_webhook_deliveries
                     WHERE delivery_id = :delivery_id
+                    FOR UPDATE
                 """),
                 {"delivery_id": str(delivery_id)},
             )
@@ -88,4 +89,67 @@ class GitHubWebhookDeliveryStore:
                     "GitHub delivery ID was previously recorded with different content."
                 )
 
-        return WebhookDeliveryResult(delivery_id, "duplicate")
+            status = row["processing_status"]
+            if status == "processed":
+                return WebhookDeliveryResult(delivery_id, "duplicate", row["attempt_count"])
+            if status == "processing" and row["lease_expires_at"] is not None:
+                lease_active = await connection.scalar(
+                    text("SELECT :lease_expires_at > now()"),
+                    {"lease_expires_at": row["lease_expires_at"]},
+                )
+                if lease_active:
+                    return WebhookDeliveryResult(
+                        delivery_id, "in_progress", row["attempt_count"]
+                    )
+
+            updated = await connection.execute(
+                text("""
+                    UPDATE github_webhook_deliveries
+                    SET processing_status = 'processing',
+                        attempt_count = attempt_count + 1,
+                        lease_expires_at = now() + make_interval(secs => :lease_seconds),
+                        last_error_code = NULL,
+                        updated_at = now()
+                    WHERE delivery_id = :delivery_id
+                    RETURNING attempt_count
+                """),
+                {"delivery_id": str(delivery_id), "lease_seconds": self.LEASE_SECONDS},
+            )
+            return WebhookDeliveryResult(delivery_id, "claimed", updated.scalar_one())
+
+    async def mark_processed(self, delivery_id: UUID) -> None:
+        async with self._engine.begin() as connection:
+            result = await connection.execute(
+                text("""
+                    UPDATE github_webhook_deliveries
+                    SET processing_status = 'processed',
+                        processed_at = now(),
+                        lease_expires_at = NULL,
+                        last_error_code = NULL,
+                        updated_at = now()
+                    WHERE delivery_id = :delivery_id
+                      AND processing_status = 'processing'
+                """),
+                {"delivery_id": str(delivery_id)},
+            )
+            if result.rowcount != 1:
+                raise RuntimeError("Webhook delivery is not owned by an active processing lease.")
+
+    async def mark_failed(self, delivery_id: UUID, *, error_code: str) -> None:
+        if not error_code or len(error_code) > 100:
+            raise ValueError("A bounded, non-empty error code is required.")
+        async with self._engine.begin() as connection:
+            result = await connection.execute(
+                text("""
+                    UPDATE github_webhook_deliveries
+                    SET processing_status = 'failed',
+                        lease_expires_at = NULL,
+                        last_error_code = :error_code,
+                        updated_at = now()
+                    WHERE delivery_id = :delivery_id
+                      AND processing_status = 'processing'
+                """),
+                {"delivery_id": str(delivery_id), "error_code": error_code},
+            )
+            if result.rowcount != 1:
+                raise RuntimeError("Webhook delivery is not owned by an active processing lease.")
