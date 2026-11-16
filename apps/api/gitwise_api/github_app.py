@@ -47,7 +47,7 @@ class GitHubAppClient:
         private_key: str,
         client: httpx.AsyncClient | None = None,
     ) -> None:
-        if app_id < 1:
+        if type(app_id) is not int or app_id < 1:
             raise ValueError("GitHub App ID must be a positive integer.")
         if not private_key.strip():
             raise ValueError("GitHub App private key must be configured.")
@@ -75,7 +75,7 @@ class GitHubAppClient:
 
     async def verify_installation(self, installation_id: int) -> GitHubAppInstallation:
         """Prove that the installation exists and belongs to this exact App."""
-        if installation_id < 1:
+        if type(installation_id) is not int or installation_id < 1:
             raise ValueError("GitHub installation ID must be a positive integer.")
         response = await self._client.get(
             f"/app/installations/{installation_id}",
@@ -210,13 +210,15 @@ class GitHubAppClient:
         repository_name: str,
     ) -> GitHubInstallationToken:
         """Verify immutable repository membership and mint a one-repository token."""
-        if repository_id < 1:
+        if type(repository_id) is not int or repository_id < 1:
             raise ValueError("GitHub repository ID must be a positive integer.")
         if (
             not owner
             or "/" in owner
             or not repository_name
             or "/" in repository_name
+            or len(repository_name) > 100
+            or repository_name in (".", "..")
         ):
             raise ValueError("A valid GitHub owner and repository name are required.")
 
