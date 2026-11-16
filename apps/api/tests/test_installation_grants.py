@@ -58,9 +58,9 @@ def test_installation_grants_are_idempotent_and_isolated() -> None:
                 == 1
             )
 
-            assert await store.apply_repository_changes(
-                first, [], [first_repository_id]
-            ) == (0, 1)
+            assert await store.reconcile_installation_repositories(
+                first, [first_repositories[1]]
+            ) == (1, 1)
 
             async with store._engine.connect() as connection:
                 active = await connection.execute(
