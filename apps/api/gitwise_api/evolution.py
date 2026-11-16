@@ -112,7 +112,12 @@ def compare_genomes(
     for identity in sorted(base_edges.keys() | head_edges.keys()):
         old = base_edges.get(identity)
         new = head_edges.get(identity)
-        if old is not None and new is not None and old.model_dump(exclude={"commit_sha"}) == new.model_dump(exclude={"commit_sha"}):
+        if (
+            old is not None
+            and new is not None
+            and old.model_dump(exclude={"commit_sha"})
+            == new.model_dump(exclude={"commit_sha"})
+        ):
             continue
         changes.append(GenomeChange(
             category="architecture.import",
