@@ -25,8 +25,6 @@ def module_name_for_path(path: str) -> str | None:
         return None
     if parts[-1] == "__init__":
         parts.pop()
-    else:
-        parts[-1] = parts[-1]
     return ".".join(parts) or None
 
 
