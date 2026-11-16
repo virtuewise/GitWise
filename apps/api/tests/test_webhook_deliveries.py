@@ -34,7 +34,9 @@ def test_postgresql_webhook_delivery_claim_is_idempotent_and_detects_reuse() -> 
             assert concurrent.outcome == "in_progress"
 
             await store.mark_failed(
-                delivery_id, claim_token=first.claim_token, error_code="temporary_failure"
+                delivery_id,
+                claim_token=first.claim_token,
+                error_code="temporary_failure",
             )
             retry = await store.claim(
                 delivery_id=delivery_id,
