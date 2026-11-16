@@ -28,12 +28,16 @@ def module_name_for_path(path: str) -> str | None:
     return ".".join(parts) or None
 
 
-def extract_python_imports(source: str, module_name: str, path: str) -> list[PythonImport]:
-    """Extract import targets without importing or executing repository code."""
+def parse_python_imports(
+    source: str,
+    module_name: str,
+    path: str,
+) -> list[PythonImport] | None:
+    """Parse imports, returning None when the source cannot be parsed."""
     try:
         tree = ast.parse(source, filename=path)
     except (SyntaxError, ValueError, TypeError):
-        return []
+        return None
 
     is_package = path.endswith("/__init__.py") or path == "__init__.py"
     package_parts = module_name.split(".") if is_package else module_name.split(".")[:-1]
@@ -69,3 +73,8 @@ def extract_python_imports(source: str, module_name: str, path: str) -> list[Pyt
                 )
 
     return imports
+
+
+def extract_python_imports(source: str, module_name: str, path: str) -> list[PythonImport]:
+    """Extract import targets, returning an empty list for invalid source."""
+    return parse_python_imports(source, module_name, path) or []
