@@ -332,3 +332,106 @@ def test_rejects_suspended_installation() -> None:
                 await app.verify_installation(456)
 
     asyncio.run(exercise())
+
+def test_lists_current_installation_repositories_with_metadata_only_token() -> None:
+    async def exercise() -> None:
+        private_pem, _ = make_app_key()
+        seen: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request)
+            if request.method == "GET" and request.url.path == "/app/installations/456":
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": 456,
+                        "app_id": 123,
+                        "account": {"id": 789, "login": "acme"},
+                        "target_type": "Organization",
+                        "repository_selection": "selected",
+                        "permissions": {"contents": "read", "metadata": "read"},
+                    },
+                )
+            if request.method == "POST":
+                assert json.loads(request.content) == {
+                    "permissions": {"metadata": "read"}
+                }
+                return httpx.Response(
+                    201,
+                    json={
+                        "token": "metadata-only-token",
+                        "expires_at": "2026-11-17T00:00:00Z",
+                        "permissions": {"metadata": "read"},
+                    },
+                )
+            assert request.url.path == "/installation/repositories"
+            assert request.headers["Authorization"] == "Bearer metadata-only-token"
+            return httpx.Response(
+                200,
+                json={
+                    "total_count": 2,
+                    "repositories": [
+                        {
+                            "id": 9001,
+                            "full_name": "acme/api",
+                            "private": True,
+                        },
+                        {
+                            "id": 9002,
+                            "full_name": "acme/web",
+                            "private": False,
+                        },
+                    ],
+                },
+            )
+
+        async with httpx.AsyncClient(
+            base_url="https://api.github.com",
+            transport=httpx.MockTransport(handler),
+        ) as http_client:
+            app = GitHubAppClient(
+                app_id=123,
+                private_key=private_pem,
+                client=http_client,
+            )
+            installation, repositories = await app.list_installation_repositories(456)
+
+        assert installation.installation_id == 456
+        assert [repository["id"] for repository in repositories] == [9001, 9002]
+        assert [request.method for request in seen] == ["GET", "POST", "GET"]
+
+    asyncio.run(exercise())
+
+
+def test_repository_listing_requires_read_contents_installation_permission() -> None:
+    async def exercise() -> None:
+        private_pem, _ = make_app_key()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "id": 456,
+                    "app_id": 123,
+                    "account": {"id": 789, "login": "acme"},
+                    "target_type": "Organization",
+                    "repository_selection": "selected",
+                    "permissions": {"metadata": "read"},
+                },
+            )
+
+        async with httpx.AsyncClient(
+            base_url="https://api.github.com",
+            transport=httpx.MockTransport(handler),
+        ) as http_client:
+            app = GitHubAppClient(
+                app_id=123,
+                private_key=private_pem,
+                client=http_client,
+            )
+            with pytest.raises(
+                GitHubAppAuthenticationError, match="contents permission"
+            ):
+                await app.list_installation_repositories(456)
+
+    asyncio.run(exercise())
