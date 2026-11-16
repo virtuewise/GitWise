@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from fastapi import HTTPException
 import httpx
 import pytest
+from fastapi import HTTPException
 
 from gitwise_api.ingestion import GitHubRepositoryClient
 from gitwise_api.repositories import parse_github_repository_url
@@ -37,7 +37,10 @@ async def test_inspect_builds_commit_pinned_genome_snapshot() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json=responses[request.url.path])
 
-    async with httpx.AsyncClient(base_url="https://api.github.com", transport=httpx.MockTransport(handler)) as http_client:
+    async with httpx.AsyncClient(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
         service = GitHubRepositoryClient(http_client)
         snapshot = await service.inspect(parse_github_repository_url("https://github.com/acme/widget"))
 
@@ -63,7 +66,10 @@ async def test_inspect_maps_missing_repository_to_404() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404, json={"message": "Not Found"})
 
-    async with httpx.AsyncClient(base_url="https://api.github.com", transport=httpx.MockTransport(handler)) as http_client:
+    async with httpx.AsyncClient(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
         service = GitHubRepositoryClient(http_client)
         with pytest.raises(HTTPException) as error:
             await service.inspect(parse_github_repository_url("https://github.com/acme/missing"))
@@ -76,7 +82,10 @@ async def test_inspect_maps_rate_limit_to_retryable_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(403, headers={"Retry-After": "30"}, json={"message": "rate limited"})
 
-    async with httpx.AsyncClient(base_url="https://api.github.com", transport=httpx.MockTransport(handler)) as http_client:
+    async with httpx.AsyncClient(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
         service = GitHubRepositoryClient(http_client)
         with pytest.raises(HTTPException) as error:
             await service.inspect(parse_github_repository_url("https://github.com/acme/widget"))
