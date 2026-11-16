@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from fastapi import HTTPException
 import httpx
 import pytest
-from fastapi import HTTPException
 
 from gitwise_api.ingestion import GitHubRepositoryClient
 from gitwise_api.repositories import parse_github_repository_url
@@ -51,7 +51,11 @@ async def test_inspect_builds_commit_pinned_genome_snapshot() -> None:
         "project.manifest",
         "project.documentation_entrypoint",
     }
-    assert all(evidence.commit_sha == snapshot.commit_sha for fact in snapshot.facts for evidence in fact.evidence)
+    assert all(
+        evidence.commit_sha == snapshot.commit_sha
+        for fact in snapshot.facts
+        for evidence in fact.evidence
+    )
 
 
 @pytest.mark.anyio
