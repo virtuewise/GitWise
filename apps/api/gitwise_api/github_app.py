@@ -125,15 +125,21 @@ class GitHubAppClient:
         self,
         installation_id: int,
         *,
-        repositories: tuple[str, ...] = (),
+        repositories: tuple[str, ...],
     ) -> GitHubInstallationToken:
         """Mint a short-lived token only after re-verifying App ownership."""
-        await self.verify_installation(installation_id)
-        if len(repositories) > 500 or any(
-            not name or "/" in name or name in (".", "..") for name in repositories
+        if (
+            not repositories
+            or len(repositories) > 500
+            or len(set(repositories)) != len(repositories)
+            or any(
+                not name or len(name) > 100 or "/" in name or name in (".", "..")
+                for name in repositories
+            )
         ):
-            raise ValueError("Repository scope must contain valid repository names.")
-        body = {"repositories": list(repositories)} if repositories else {}
+            raise ValueError("A non-empty, unique repository scope is required.")
+        await self.verify_installation(installation_id)
+        body = {"repositories": list(repositories)}
         response = await self._client.post(
             f"/app/installations/{installation_id}/access_tokens",
             headers={"Authorization": f"Bearer {self._app_jwt()}"},
@@ -159,6 +165,13 @@ class GitHubAppClient:
             or not isinstance(expires_at, str)
             or not isinstance(permissions, dict)
             or not isinstance(repositories_payload, list)
+            or not repositories_payload
+            or any(
+                not isinstance(item, dict)
+                or not isinstance(item.get("full_name"), str)
+                or item["full_name"].rsplit("/", 1)[-1] not in repositories
+                for item in repositories_payload
+            )
         ):
             raise GitHubAppAuthenticationError(
                 "GitHub returned an invalid installation token response."
