@@ -20,6 +20,26 @@ _UNORDERED_LIST_FIELDS = {
     "tree",
 }
 
+# Repository metadata can change without the commit changing. Keep it in the
+# stored observation for display/audit, but do not let it alter commit content.
+_MUTABLE_REPOSITORY_FACT_PREFIX = "repository."
+
+# Digest v1 is deliberately an allowlisted projection. This prevents newly
+# added presentation/provenance fields from silently changing persistence
+# identity. Changing these semantics requires a schema-version decision.
+_COMMIT_CONTENT_FIELDS = (
+    "schema_version",
+    "provider_repository_id",
+    "commit_sha",
+    "tree_sha",
+    "truncated",
+    "files_analyzed",
+    "tree",
+    "architecture_analysis",
+    "architecture_nodes",
+    "architecture_edges",
+)
+
 
 def snapshot_storage_key(snapshot: SoftwareGenomeSnapshot) -> str:
     """Return the canonical key for a provider repository and resolved commit.
@@ -47,10 +67,7 @@ def _canonicalize(value: Any, *, field_name: str | None = None) -> Any:
             result.pop("generated_at")
         return result
     if isinstance(value, list):
-        normalized = [
-            _canonicalize(item)
-            for item in value
-        ]
+        normalized = [_canonicalize(item) for item in value]
         if field_name not in _UNORDERED_LIST_FIELDS:
             return normalized
         return sorted(
@@ -62,19 +79,56 @@ def _canonicalize(value: Any, *, field_name: str | None = None) -> Any:
     return value
 
 
-def snapshot_content_digest(snapshot: SoftwareGenomeSnapshot) -> str:
-    """Hash snapshot content while excluding observation-time-only metadata.
+def _commit_content_projection(snapshot: SoftwareGenomeSnapshot) -> dict[str, Any]:
+    """Project a snapshot onto immutable, commit-derived Genome content.
 
-    Equivalent observations of the same commit therefore produce the same
-    digest when unordered Genome collections arrive in a different order.
-    Ordered lists inside fact values remain ordered and affect the digest.
+    Excludes mutable repository metadata (including repository.* facts),
+    observation timestamps, generated fact IDs, and URL provenance. Evidence
+    still retains commit, path, and extraction method, so content remains
+    traceable without depending on a mutable owner/name URL.
     """
     payload = snapshot.model_dump(mode="json")
-    canonical = _canonicalize(payload)
+    projection = {field: payload[field] for field in _COMMIT_CONTENT_FIELDS}
+
+    commit_facts = []
+    for fact in payload["facts"]:
+        if fact["fact_type"].startswith(_MUTABLE_REPOSITORY_FACT_PREFIX):
+            continue
+        stable_fact = {
+            key: fact[key]
+            for key in (
+                "schema_version",
+                "fact_type",
+                "value",
+                "confidence",
+                "verification_status",
+            )
+        }
+        stable_fact["evidence"] = [
+            {
+                key: evidence[key]
+                for key in ("source_path", "commit_sha", "extraction_method")
+            }
+            for evidence in fact["evidence"]
+        ]
+        commit_facts.append(stable_fact)
+    projection["facts"] = commit_facts
+    return projection
+
+
+def snapshot_content_digest(snapshot: SoftwareGenomeSnapshot) -> str:
+    """Hash canonical commit-derived content, excluding mutable metadata.
+
+    Re-observing the same commit under another ref or repository slug yields
+    the same digest. Commit content, extraction results, and ordered fact-value
+    arrays remain digest-significant.
+    """
+    canonical = _canonicalize(_commit_content_projection(snapshot))
     encoded = json.dumps(
         canonical,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
+        allow_nan=False,
     ).encode("utf-8")
     return sha256(encoded).hexdigest()
