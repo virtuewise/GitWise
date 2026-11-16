@@ -81,10 +81,10 @@ async def root() -> dict[str, str]:
 
 @app.post("/webhooks/github", tags=["webhooks"])
 async def receive_github_webhook(request: Request) -> dict[str, str]:
-    """Authenticate and durably process supported GitHub's ping handshake.
+    """Authenticate and durably process GitHub ping and installation lifecycle events.
 
-    Installation lifecycle events are processed only after signature verification,
-    App ownership checks, and immutable repository identity verification.
+    Lifecycle events are processed only after signature verification, App ownership
+    checks, and reconciliation against GitHub's current installation state.
     """
     secret = get_settings().github_webhook_secret
     delivery_store = getattr(request.app.state, "webhook_delivery_store", None)
