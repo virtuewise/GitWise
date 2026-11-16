@@ -77,7 +77,9 @@ class GitHubAppClient:
         token = jwt.encode(claims, self._private_key, algorithm="RS256")
         return token.decode("ascii") if isinstance(token, bytes) else token
 
-    async def verify_installation(self, installation_id: int) -> GitHubAppInstallation:
+    async def verify_installation(
+        self, installation_id: int, *, allow_suspended: bool = False
+    ) -> GitHubAppInstallation:
         """Prove that the installation exists and belongs to this exact App."""
         if type(installation_id) is not int or installation_id < 1:
             raise ValueError("GitHub installation ID must be a positive integer.")
@@ -127,7 +129,7 @@ class GitHubAppClient:
                 "The installation identity does not match the configured GitHub App."
             )
 
-        if suspended_at is not None:
+        if suspended_at is not None and not allow_suspended:
             raise GitHubAppAuthenticationError("The GitHub App installation is suspended.")
 
         return GitHubAppInstallation(
