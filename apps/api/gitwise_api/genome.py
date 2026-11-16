@@ -100,6 +100,7 @@ class SoftwareGenomeSnapshot(BaseModel):
     repository_url: str
     description: str | None = None
     default_branch: str
+    requested_ref: str | None = None
     commit_sha: str
     tree_sha: str
     primary_language: str | None = None
