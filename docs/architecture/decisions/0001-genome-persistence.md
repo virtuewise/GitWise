@@ -30,7 +30,7 @@ The canonical key is:
 
 For the initial GitHub provider, the implementation helper emits `github:{repository_id}:{commit_sha}:schema-{schema_version}`. Repository owner/name and requested branch/tag are not key components: names and refs can change while the commit remains the same.
 
-A durable write must be insert-if-absent. If the key already exists, compare the canonical content digest. An identical digest is an idempotent success; a different digest is a conflict requiring investigation, never a silent overwrite. The original observation timestamp and ingestion metadata must remain auditable.
+A durable write must be insert-if-absent. If the key already exists, compare the canonical content digest. An identical digest is an idempotent success; a different digest is a conflict requiring investigation, never a silent overwrite. The original observation timestamp and ingestion metadata must remain auditable. Digest canonicalization may normalize only collections whose order is explicitly non-semantic (such as snapshot tree entries, architecture nodes/edges, facts, evidence, and limitation codes). It must preserve ordering inside fact values and other domain payloads, because those arrays may encode meaningful sequence.
 
 ### 3. Keep snapshots immutable and schema-versioned
 
@@ -54,7 +54,7 @@ Define retention per repository owner before production storage. Deletion must r
 ## Implementation sequence
 
 1. **Completed:** expose GitHub's immutable numeric repository ID in new Software Genome snapshots.
-2. **Completed:** add backend-neutral canonical snapshot keys and content digests, with timestamp/order invariance tests.
+2. **Completed:** add backend-neutral canonical snapshot keys and content digests, with timestamp/order invariance tests; preserve semantically ordered arrays inside fact values.
 3. Add PostgreSQL migrations and a transactional store with insert-if-absent/conflict semantics.
 4. Add owner/installation access grants and enforce authorization before any snapshot operation.
 5. Add retention, deletion, audit, and installation-revocation workflows.
