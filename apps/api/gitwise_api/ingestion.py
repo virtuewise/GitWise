@@ -267,7 +267,13 @@ class GitHubRepositoryClient:
                             })
                 elif filename == "package.json":
                     document = json.loads(text_content)
-                    for section in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+                    sections = (
+                        "dependencies",
+                        "devDependencies",
+                        "peerDependencies",
+                        "optionalDependencies",
+                    )
+                    for section in sections:
                         declared = document.get(section, {})
                         if isinstance(declared, dict):
                             for name, constraint in declared.items():
@@ -285,7 +291,11 @@ class GitHubRepositoryClient:
                         if isinstance(declared, dict):
                             for name, constraint in declared.items():
                                 if isinstance(name, str):
-                                    version = constraint if isinstance(constraint, str) else constraint.get("version", "")
+                                    version = (
+                                        constraint
+                                        if isinstance(constraint, str)
+                                        else constraint.get("version", "")
+                                    )
                                     dependencies.append({
                                         "name": name,
                                         "constraint": version if isinstance(version, str) else "",
