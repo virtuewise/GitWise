@@ -28,8 +28,8 @@ def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability
 
         repository_id = uuid4().int % (2**62) + 1
         principal_id = f"test-user-{uuid4()}"
-        installation_id = f"test-installation-{uuid4()}"
-        other_installation_id = f"other-installation-{uuid4()}"
+        installation_id = str(uuid4().int % 1_000_000_000 + 1)
+        other_installation_id = str(uuid4().int % 1_000_000_000 + 1_000_000_001)
         repository = f"gitwise-integration/repo-{repository_id}"
         repository_url = f"https://github.com/{repository}"
         commit_sha = "a" * 40
@@ -138,10 +138,19 @@ def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability
                 user=VerifiedGitHubUser(
                     user_id=789,
                     login="maintainer",
-                    installation_ids=(int(installation_id.split("-")[-1]) if False else 0,),
+                    installation_ids=(int(installation_id),),
                 ),
             )
             assert user_read.commit_sha == snapshot.commit_sha
+            with pytest.raises(SnapshotAccessDenied):
+                await store.get_snapshot_for_user(
+                    first.snapshot_key,
+                    user=VerifiedGitHubUser(
+                        user_id=790,
+                        login="unrelated",
+                        installation_ids=(),
+                    ),
+                )
             with pytest.raises(SnapshotAccessDenied):
                 await store.get_snapshot(
                     first.snapshot_key,
