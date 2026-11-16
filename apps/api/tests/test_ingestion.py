@@ -120,3 +120,66 @@ async def test_inspect_maps_rate_limit_to_retryable_error() -> None:
 
     assert error.value.status_code == 503
     assert error.value.headers["Retry-After"] == "30"
+
+
+@pytest.mark.anyio
+async def test_inspect_extracts_package_json_dependencies_with_blob_provenance() -> None:
+    responses = {
+        "/repos/acme/widget": {
+            "default_branch": "main",
+            "description": None,
+            "language": "TypeScript",
+            "private": False,
+            "visibility": "public",
+        },
+        "/repos/acme/widget/branches/main": {
+            "commit": {
+                "sha": "commit7654321",
+                "commit": {"tree": {"sha": "tree7654321"}},
+            }
+        },
+        "/repos/acme/widget/git/trees/tree7654321": {
+            "truncated": False,
+            "tree": [
+                {
+                    "path": "frontend/package.json",
+                    "type": "blob",
+                    "sha": "blob7654321",
+                    "size": 75,
+                    "mode": "100644",
+                }
+            ],
+        },
+        "/repos/acme/widget/git/blobs/blob7654321": {
+            "encoding": "base64",
+            "content": "eyJkZXBlbmRlbmNpZXMiOnsiZXhhbXBsZS1saWIiOiJeMS4yLjAifX0=",
+            "size": 43,
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=responses[request.url.path])
+
+    async with httpx.AsyncClient(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        service = GitHubRepositoryClient(http_client)
+        repository = parse_github_repository_url("https://github.com/acme/widget")
+        snapshot = await service.inspect(repository)
+
+    dependency_facts = [
+        fact for fact in snapshot.facts if fact.fact_type == "dependency.declared"
+    ]
+    assert len(dependency_facts) == 1
+    fact = dependency_facts[0]
+    assert fact.value == {
+        "name": "example-lib",
+        "constraint": "^1.2.0",
+        "ecosystem": "npm",
+        "group": "dependencies",
+    }
+    assert fact.evidence[0].source_path == "frontend/package.json"
+    assert fact.evidence[0].commit_sha == snapshot.commit_sha
+    assert fact.evidence[0].extraction_method == "github_git_blob_manifest_parser"
+
