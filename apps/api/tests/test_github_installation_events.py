@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 
 import pytest
+
 from gitwise_api.github_app import GitHubAppInstallation, GitHubInstallationToken
 from gitwise_api.github_installation_events import (
     GitHubInstallationEventError,
