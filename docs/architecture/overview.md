@@ -71,7 +71,7 @@ Verified delivery IDs are recorded transactionally in PostgreSQL. The unique del
 
 `apps/api/gitwise_api/github_app.py` implements the App-authenticated identity boundary. It creates short-lived RS256 App JWTs, queries GitHub's App installation endpoint, and verifies that the returned installation ID and App ID match the configured credentials before minting an installation access token. Token creation can be scoped to an explicit repository-name allowlist; tokens are short-lived credentials and must remain in memory, never in logs or persistent storage.
 
-This client is not yet connected to webhook event dispatch or access-grant provisioning. Installation lifecycle events remain unsupported by the webhook route until the event's installation identity is checked through this App-authenticated client, repository membership is verified, and grant changes are applied transactionally with auditable revocation semantics.
+The client now also supports a one-repository token exchange that checks the installation account, the returned repository's immutable numeric ID and full name, and an explicit `contents: read` permission before returning the token. The caller must compare that verified repository ID with the ID from the signed event; repository names alone are not authorization identities. Tokens remain short-lived and in memory only. This client is not yet connected to webhook event dispatch or access-grant provisioning. Installation lifecycle events remain unsupported by the webhook route until signed event data is reconciled with this App-authenticated repository identity, grant changes are applied transactionally, and revocation/tenant-isolation tests pass.
 
 ## Proposed components
 
