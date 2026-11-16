@@ -321,6 +321,7 @@ class GitHubRepositoryClient:
                     source_url=(
                         f"{repository.canonical_url}/blob/{commit_sha}/{quote(path, safe='/')}"
                     ),
+                    extraction_method="github_git_blob_manifest_parser",
                 ))
 
         blob_paths = {entry.path for entry in entries if entry.kind == "blob"}
