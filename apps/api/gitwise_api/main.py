@@ -74,10 +74,15 @@ async def compare_repository_refs(request: RepositoryCompareRequest) -> GenomeCo
     repository = parse_github_repository_url(request.url)
     github = GitHubRepositoryClient()
     try:
-        base, head = await asyncio.gather(
+        results = await asyncio.gather(
             github.inspect(repository, request.base_ref),
             github.inspect(repository, request.head_ref),
+            return_exceptions=True,
         )
+        for result in results:
+            if isinstance(result, Exception):
+                raise result
+        base, head = results
         return compare_genomes(base, head)
     finally:
         await github.close()
