@@ -131,10 +131,10 @@ async def receive_github_webhook(request: Request) -> dict[str, str]:
     try:
         # The ping handshake has no domain side effects. Lifecycle handlers will
         # complete their database effects before marking this delivery processed.
-        await delivery_store.mark_processed(delivery_id)
+        await delivery_store.mark_processed(delivery_id, claim_token=result.claim_token)
     except Exception as exc:
         try:
-            await delivery_store.mark_failed(delivery_id, error_code="handler_failure")
+            await delivery_store.mark_failed(\n                delivery_id, claim_token=result.claim_token, error_code="handler_failure"\n            )
         except RuntimeError:
             pass
         raise HTTPException(
