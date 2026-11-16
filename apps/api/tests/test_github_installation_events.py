@@ -55,7 +55,7 @@ class FakeGrantStore:
         self.granted: list[tuple[int, ...]] = []
         self.revoked: list[tuple[int, tuple[int, ...]]] = []
         self.installation_revocations: list[int] = []
-        self.atomic_changes: list[tuple[int, tuple[int, ...]]] = []
+        self.atomic_changes: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
 
     async def grant_repositories(self, installation, repositories):
         self.granted.append(tuple(item["id"] for item in repositories))
@@ -201,6 +201,7 @@ def test_rejects_duplicate_or_malformed_repository_ids() -> None:
 
     asyncio.run(exercise())
 
+
 def test_rejects_unknown_installation_repository_action() -> None:
     async def exercise() -> None:
         with pytest.raises(
@@ -255,6 +256,7 @@ def test_rejects_repository_identity_mismatch_from_token_exchange() -> None:
                     "repositories_added": [
                         {"id": 9001, "full_name": "acme/api"}
                     ],
+                    "repositories_removed": [],
                 },
                 app_id=123,
                 app=MismatchedGitHubApp(),
