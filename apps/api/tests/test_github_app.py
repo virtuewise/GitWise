@@ -232,3 +232,48 @@ def test_repository_scoped_token_verifies_immutable_repository_id() -> None:
 
     asyncio.run(exercise())
 
+
+def test_rejects_non_integer_installation_identity_fields() -> None:
+    async def exercise() -> None:
+        private_pem, _ = make_app_key()
+        invalid_payloads = [
+            {
+                "id": True,
+                "app_id": 123,
+                "account": {"id": 789, "login": "acme"},
+                "target_type": "Organization",
+                "repository_selection": "all",
+            },
+            {
+                "id": 456,
+                "app_id": "123",
+                "account": {"id": 789, "login": "acme"},
+                "target_type": "Organization",
+                "repository_selection": "all",
+            },
+            {
+                "id": 456,
+                "app_id": 123,
+                "account": {"id": True, "login": "acme"},
+                "target_type": "Organization",
+                "repository_selection": "all",
+            },
+        ]
+        for payload in invalid_payloads:
+            async with httpx.AsyncClient(
+                base_url="https://api.github.com",
+                transport=httpx.MockTransport(
+                    lambda request, body=payload: httpx.Response(200, json=body)
+                ),
+            ) as http_client:
+                app = GitHubAppClient(
+                    app_id=123,
+                    private_key=private_pem,
+                    client=http_client,
+                )
+                with pytest.raises(
+                    GitHubAppAuthenticationError, match="does not match"
+                ):
+                    await app.verify_installation(456)
+
+    asyncio.run(exercise())
