@@ -50,6 +50,16 @@ Facts must be traceable to repository evidence. Avoid presenting inferred archit
 - Dependency facts describe declarations only; they do not establish installation, runtime usage, vulnerability status, or compatibility.
 - Dependency facts describe declarations only; they do not establish installation, runtime usage, vulnerability status, or compatibility.\n- The initial Python architecture graph links only imports that resolve unambiguously to modules in the inspected tree. Each edge records its source path, line number, commit SHA, and extraction method.\n- Architecture analysis reports discovered, selected, and analyzed file counts plus explicit limitations. A partial graph must never be presented as complete.
 
+## Genome evolution foundation
+
+The initial comparison engine lives in `apps/api/gitwise_api/evolution.py`. It compares two already-produced Software Genome snapshots for the same repository and emits deterministic added, removed, and changed records for:
+
+- Python architecture modules.
+- Commit-pinned Python import relationships.
+- Declared dependencies, keyed by manifest path, ecosystem, normalized package name, and declaration group.
+
+Changes retain before/after values and the evidence available on each side. Import edges carry source-path and commit provenance. The comparison engine does not claim runtime impact, compatibility, vulnerability, or causality. It is currently a pure in-process capability: snapshot persistence, historical ref ingestion, and a public comparison API are not implemented yet.
+
 ## Security boundaries
 
 - Start read-only and request minimum GitHub App permissions.
