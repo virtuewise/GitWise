@@ -48,6 +48,53 @@ class GenomeSnapshotStore:
     async def close(self) -> None:
         await self._engine.dispose()
 
+    async def get_snapshot(
+        self,
+        snapshot_key: str,
+        *,
+        principal_type: PrincipalType,
+        principal_id: str,
+    ) -> SoftwareGenomeSnapshot:
+        """Read a snapshot only through the caller's active repository grant.
+
+        Missing snapshots and unauthorized snapshots intentionally produce the
+        same error so callers cannot probe private repository history.
+        """
+        if not principal_id or len(principal_id) > 255:
+            raise ValueError("A valid authenticated principal ID is required.")
+        if principal_type not in ("github_user", "github_app_installation"):
+            raise ValueError("Unsupported repository access principal type.")
+        if not snapshot_key or len(snapshot_key) > 512:
+            raise ValueError("A valid snapshot key is required.")
+
+        async with self._engine.begin() as connection:
+            result = await connection.execute(
+                text("""
+                    SELECT snapshot.payload
+                    FROM software_genome_snapshots AS snapshot
+                    JOIN repository_access_grants AS grant
+                      ON grant.provider = snapshot.provider
+                     AND grant.provider_repository_id = snapshot.provider_repository_id
+                    WHERE snapshot.snapshot_key = :snapshot_key
+                      AND grant.principal_type = :principal_type
+                      AND grant.principal_id = :principal_id
+                      AND grant.revoked_at IS NULL
+                      AND grant.permission IN ('read', 'write', 'admin')
+                    FOR SHARE OF grant
+                """),
+                {
+                    "snapshot_key": snapshot_key,
+                    "principal_type": principal_type,
+                    "principal_id": principal_id,
+                },
+            )
+            payload = result.scalar_one_or_none()
+            if payload is None:
+                raise SnapshotAccessDenied(
+                    "No accessible Software Genome snapshot exists for this principal."
+                )
+            return SoftwareGenomeSnapshot.model_validate(payload)
+
     async def store_snapshot(
         self,
         snapshot: SoftwareGenomeSnapshot,
