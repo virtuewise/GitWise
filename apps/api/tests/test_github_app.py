@@ -164,6 +164,7 @@ def test_requires_valid_app_configuration() -> None:
     with pytest.raises(ValueError, match="private key"):
         GitHubAppClient(app_id=123, private_key="  ")
 
+
 def test_repository_scoped_token_verifies_immutable_repository_id() -> None:
     async def exercise() -> None:
         private_pem, _ = make_app_key()
@@ -209,7 +210,9 @@ def test_repository_scoped_token_verifies_immutable_repository_id() -> None:
             )
             assert token.repositories[0]["id"] == 999
 
-            with pytest.raises(GitHubAppAuthenticationError, match="repository identity"):
+            with pytest.raises(
+                GitHubAppAuthenticationError, match="repository identity"
+            ):
                 await app.create_repository_scoped_token(
                     456,
                     repository_id=1000,
