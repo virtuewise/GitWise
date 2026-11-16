@@ -255,6 +255,11 @@ async def test_inspect_builds_commit_pinned_python_import_graph() -> None:
         "pkg.core",
         "pkg.service",
     }
+    assert snapshot.architecture_analysis.status == "complete"
+    assert snapshot.architecture_analysis.files_discovered == 3
+    assert snapshot.architecture_analysis.files_selected == 3
+    assert snapshot.architecture_analysis.files_analyzed == 3
+    assert snapshot.architecture_analysis.limitations == []
     assert len(snapshot.architecture_edges) == 1
     edge = snapshot.architecture_edges[0]
     assert edge.source_module == "pkg.service"
@@ -263,3 +268,60 @@ async def test_inspect_builds_commit_pinned_python_import_graph() -> None:
     assert edge.line_number == 1
     assert edge.commit_sha == snapshot.commit_sha
     assert edge.extraction_method == "python_ast_import_analyzer"
+
+
+@pytest.mark.anyio
+async def test_inspect_marks_architecture_partial_when_blob_provenance_is_inconsistent() -> None:
+    import base64
+
+    source = b"from .core import run\n"
+    responses = {
+        "/repos/acme/widget": {
+            "default_branch": "main",
+            "description": None,
+            "language": "Python",
+            "private": False,
+            "visibility": "public",
+        },
+        "/repos/acme/widget/branches/main": {
+            "commit": {
+                "sha": "commitpartial123",
+                "commit": {"tree": {"sha": "treepartial123"}},
+            }
+        },
+        "/repos/acme/widget/git/trees/treepartial123": {
+            "truncated": False,
+            "tree": [
+                {
+                    "path": "src/pkg/service.py",
+                    "type": "blob",
+                    "sha": "serviceblob",
+                    "size": len(source),
+                    "mode": "100644",
+                }
+            ],
+        },
+        "/repos/acme/widget/git/blobs/serviceblob": {
+            "encoding": "base64",
+            "content": base64.b64encode(source).decode("ascii"),
+            "size": len(source) + 1,
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=responses[request.url.path])
+
+    async with httpx.AsyncClient(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        service = GitHubRepositoryClient(http_client)
+        snapshot = await service.inspect(
+            parse_github_repository_url("https://github.com/acme/widget")
+        )
+
+    assert snapshot.architecture_analysis.status == "partial"
+    assert snapshot.architecture_analysis.files_discovered == 1
+    assert snapshot.architecture_analysis.files_selected == 1
+    assert snapshot.architecture_analysis.files_analyzed == 0
+    assert "python_blob_size_mismatch" in snapshot.architecture_analysis.limitations
