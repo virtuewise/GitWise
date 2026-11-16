@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from gitwise_api.genome import SoftwareGenomeSnapshot
+from gitwise_api.github_user import VerifiedGitHubUser
 from gitwise_api.snapshot_identity import snapshot_content_digest, snapshot_storage_key
 
 PrincipalType = Literal["github_user", "github_app_installation"]
@@ -86,6 +87,60 @@ class GenomeSnapshotStore:
                     "snapshot_key": snapshot_key,
                     "principal_type": principal_type,
                     "principal_id": principal_id,
+                },
+            )
+            payload = result.scalar_one_or_none()
+            if payload is None:
+                raise SnapshotAccessDenied(
+                    "No accessible Software Genome snapshot exists for this principal."
+                )
+            return SoftwareGenomeSnapshot.model_validate(payload)
+
+    async def get_snapshot_for_user(
+        self,
+        snapshot_key: str,
+        *,
+        user: VerifiedGitHubUser,
+    ) -> SoftwareGenomeSnapshot:
+        """Read through installations GitHub confirms are accessible to this user."""
+        if (
+            not isinstance(user, VerifiedGitHubUser)
+            or type(user.user_id) is not int
+            or user.user_id < 1
+            or not isinstance(user.login, str)
+            or not user.login
+        ):
+            raise ValueError("A verified GitHub user identity is required.")
+        installation_ids = user.installation_ids
+        if (
+            not installation_ids
+            or any(type(item) is not int or item < 1 for item in installation_ids)
+            or len(installation_ids) != len(set(installation_ids))
+        ):
+            raise SnapshotAccessDenied(
+                "No accessible Software Genome snapshot exists for this principal."
+            )
+        if not isinstance(snapshot_key, str) or not snapshot_key or len(snapshot_key) > 512:
+            raise ValueError("A valid snapshot key is required.")
+
+        async with self._engine.begin() as connection:
+            result = await connection.execute(
+                text("""
+                    SELECT snapshot.payload
+                    FROM software_genome_snapshots AS snapshot
+                    JOIN repository_access_grants AS access_grant
+                      ON access_grant.provider = snapshot.provider
+                     AND access_grant.provider_repository_id = snapshot.provider_repository_id
+                    WHERE snapshot.snapshot_key = :snapshot_key
+                      AND access_grant.principal_type = 'github_app_installation'
+                      AND access_grant.principal_id = ANY(:installation_ids)
+                      AND access_grant.revoked_at IS NULL
+                      AND access_grant.permission IN ('read', 'write', 'admin')
+                    FOR SHARE OF access_grant
+                """),
+                {
+                    "snapshot_key": snapshot_key,
+                    "installation_ids": [str(item) for item in installation_ids],
                 },
             )
             payload = result.scalar_one_or_none()
