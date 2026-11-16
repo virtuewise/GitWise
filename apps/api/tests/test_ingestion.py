@@ -27,16 +27,35 @@ async def test_inspect_builds_commit_pinned_genome_snapshot() -> None:
         "/repos/acme/widget/git/trees/tree1234567": {
             "truncated": False,
             "tree": [
-                {"path": "README.md", "type": "blob", "sha": "readme123", "size": 20, "mode": "100644"},
-                {"path": "apps/api/README.md", "type": "blob", "sha": "nestedreadme", "size": 30, "mode": "100644"},
-                {"path": "apps/api/pyproject.toml", "type": "blob", "sha": "manifest12", "size": 100, "mode": "100644"},
+                {
+                    "path": "README.md",
+                    "type": "blob",
+                    "sha": "readme123",
+                    "size": 20,
+                    "mode": "100644",
+                },
+                {
+                    "path": "apps/api/README.md",
+                    "type": "blob",
+                    "sha": "nestedreadme",
+                    "size": 30,
+                    "mode": "100644",
+                },
+                {
+                    "path": "apps/api/pyproject.toml",
+                    "type": "blob",
+                    "sha": "manifest12",
+                    "size": 100,
+                    "mode": "100644",
+                },
                 {"path": "src", "type": "tree", "sha": "directory1"},
             ],
         },
     }
 
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.params.get("recursive") == "1" if request.url.path.endswith("/git/trees/tree1234567") else True
+        if request.url.path.endswith("/git/trees/tree1234567"):
+            assert request.url.params.get("recursive") == "1"
         return httpx.Response(200, json=responses[request.url.path])
 
     async with httpx.AsyncClient(
@@ -44,7 +63,8 @@ async def test_inspect_builds_commit_pinned_genome_snapshot() -> None:
         transport=httpx.MockTransport(handler),
     ) as http_client:
         service = GitHubRepositoryClient(http_client)
-        snapshot = await service.inspect(parse_github_repository_url("https://github.com/acme/widget"))
+        repository = parse_github_repository_url("https://github.com/acme/widget")
+        snapshot = await service.inspect(repository)
 
     assert snapshot.repository == "acme/widget"
     assert snapshot.commit_sha == "commit1234567"
