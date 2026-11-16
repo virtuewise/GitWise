@@ -201,7 +201,8 @@ def test_activity_extends_idle_window_but_never_past_the_absolute_limit() -> Non
                 await connection.execute(
                     text(
                         "UPDATE user_sessions "
-                        "SET absolute_expires_at = now() + interval '5 minutes' "
+                        "SET idle_expires_at = now() + interval '4 minutes', "
+                        "    absolute_expires_at = now() + interval '5 minutes' "
                         "WHERE session_id = :s"
                     ),
                     {"s": session.session_id},
@@ -211,7 +212,7 @@ def test_activity_extends_idle_window_but_never_past_the_absolute_limit() -> Non
                 capped = (
                     await connection.execute(
                         text(
-                            "SELECT idle_expires_at <= absolute_expires_at FROM user_sessions "
+                            "SELECT idle_expires_at = absolute_expires_at FROM user_sessions "
                             "WHERE session_id = :s"
                         ),
                         {"s": session.session_id},
