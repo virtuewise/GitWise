@@ -72,12 +72,16 @@ def test_github_ping_endpoint_authenticates_and_deduplicates(monkeypatch) -> Non
             )
             assert invalid.status_code == 401
 
-            unsupported = await client.post(
+            not_configured = await client.post(
                 "/webhooks/github",
                 content=payload,
-                headers={**headers, "x-github-event": "installation"},
+                headers={
+                    **headers,
+                    "x-github-event": "installation",
+                    "x-github-delivery": str(uuid4()),
+                },
             )
-            assert unsupported.status_code == 501
+            assert not_configured.status_code == 503
 
         del main.app.state.webhook_delivery_store
 
