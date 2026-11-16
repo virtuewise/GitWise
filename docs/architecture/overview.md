@@ -44,7 +44,10 @@ Facts must be traceable to repository evidence. Avoid presenting inferred archit
 
 - GitHub REST calls use explicit connect/request timeouts and map missing repositories, rate limits, and upstream failures to controlled API errors.
 - The recursive tree response is capped at 2,000 entries; individual blobs above 1 MB are excluded from the analyzed tree inventory.
-- The current ingestion pass requests the recursive commit-pinned Git tree and reads metadata only. It does not fetch file contents, follow symlinks, or execute repository code.
+- The ingestion pass requests the recursive commit-pinned Git tree and reads only selected dependency manifests by Git blob SHA. It does not follow symlinks or execute repository code.
+- Manifest extraction is bounded by file count, per-file size, aggregate bytes, and a maximum number of emitted dependency facts.
+- Initial parsers cover Python `pyproject.toml` and `requirements.txt`, npm `package.json`, Rust `Cargo.toml`, and Go `go.mod`. Unsupported formats and malformed manifests are skipped rather than guessed.
+- Dependency facts describe declarations only; they do not establish installation, runtime usage, vulnerability status, or compatibility.
 - Facts are observed only when directly supported by GitHub metadata or a path in the commit-pinned tree. Architecture and dependency relationships remain future analysis stages.
 
 ## Security boundaries
