@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import base64
 import json
 import re
@@ -10,6 +9,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import HTTPException, status
 
+from gitwise_api.architecture import extract_python_imports, module_name_for_path
 from gitwise_api.genome import (
     GenomeFact,
     RepositoryTreeEntry,
