@@ -33,7 +33,9 @@ def test_postgresql_webhook_delivery_claim_is_idempotent_and_detects_reuse() -> 
             assert first.attempt_count == 1
             assert concurrent.outcome == "in_progress"
 
-            await store.mark_failed(\n                delivery_id, claim_token=first.claim_token, error_code="temporary_failure"\n            )
+            await store.mark_failed(
+                delivery_id, claim_token=first.claim_token, error_code="temporary_failure"
+            )
             retry = await store.claim(
                 delivery_id=delivery_id,
                 event_name="installation",
@@ -42,7 +44,10 @@ def test_postgresql_webhook_delivery_claim_is_idempotent_and_detects_reuse() -> 
             assert retry.outcome == "claimed"
             assert retry.attempt_count == 2
 
-            with pytest.raises(RuntimeError, match="stale or no longer active"):\n                await store.mark_processed(delivery_id, claim_token=first.claim_token)\n\n            await store.mark_processed(delivery_id, claim_token=retry.claim_token)
+            with pytest.raises(RuntimeError, match="stale or no longer active"):
+                await store.mark_processed(delivery_id, claim_token=first.claim_token)
+
+            await store.mark_processed(delivery_id, claim_token=retry.claim_token)
             duplicate = await store.claim(
                 delivery_id=delivery_id,
                 event_name="installation",
