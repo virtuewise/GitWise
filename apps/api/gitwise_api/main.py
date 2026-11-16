@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 
 from gitwise_api.config import get_settings
+from gitwise_api.genome import SoftwareGenomeSnapshot
+from gitwise_api.ingestion import GitHubRepositoryClient
 from gitwise_api.repositories import (
     RepositoryInspectRequest,
     RepositoryReference,
@@ -39,5 +41,20 @@ async def root() -> dict[str, str]:
 async def resolve_repository(
     request: RepositoryInspectRequest,
 ) -> RepositoryReference:
-    """Validate and normalize a GitHub repository URL; no repository data is fetched yet."""
+    """Validate and normalize a GitHub repository URL without network access."""
     return parse_github_repository_url(request.url)
+
+
+@app.post(
+    "/repositories/inspect",
+    response_model=SoftwareGenomeSnapshot,
+    tags=["repositories"],
+)
+async def inspect_repository(request: RepositoryInspectRequest) -> SoftwareGenomeSnapshot:
+    """Create a bounded, read-only Software Genome snapshot of a public repository."""
+    repository = parse_github_repository_url(request.url)
+    github = GitHubRepositoryClient()
+    try:
+        return await github.inspect(repository)
+    finally:
+        await github.close()
