@@ -187,3 +187,79 @@ async def test_inspect_extracts_package_json_dependencies_with_blob_provenance()
     assert fact.evidence[0].commit_sha == snapshot.commit_sha
     assert fact.evidence[0].extraction_method == "github_git_blob_manifest_parser"
 
+
+
+@pytest.mark.anyio
+async def test_inspect_builds_commit_pinned_python_import_graph() -> None:
+    import base64
+
+    sources = {
+        "src/pkg/__init__.py": "",
+        "src/pkg/core.py": "def run():\n    return True\n",
+        "src/pkg/service.py": "from .core import run\n",
+    }
+    blob_shas = {
+        "src/pkg/__init__.py": "initblob",
+        "src/pkg/core.py": "coreblob",
+        "src/pkg/service.py": "serviceblob",
+    }
+    responses = {
+        "/repos/acme/widget": {
+            "default_branch": "main",
+            "description": None,
+            "language": "Python",
+            "private": False,
+            "visibility": "public",
+        },
+        "/repos/acme/widget/branches/main": {
+            "commit": {
+                "sha": "commitgraph123",
+                "commit": {"tree": {"sha": "treegraph123"}},
+            }
+        },
+        "/repos/acme/widget/git/trees/treegraph123": {
+            "truncated": False,
+            "tree": [
+                {
+                    "path": path,
+                    "type": "blob",
+                    "sha": blob_shas[path],
+                    "size": len(source.encode("utf-8")),
+                    "mode": "100644",
+                }
+                for path, source in sources.items()
+            ],
+        },
+    }
+    for path, source in sources.items():
+        raw = source.encode("utf-8")
+        responses[f"/repos/acme/widget/git/blobs/{blob_shas[path]}"] = {
+            "encoding": "base64",
+            "content": base64.b64encode(raw).decode("ascii"),
+            "size": len(raw),
+        }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=responses[request.url.path])
+
+    async with httpx.AsyncClient(
+        base_url="https://api.github.com",
+        transport=httpx.MockTransport(handler),
+    ) as http_client:
+        service = GitHubRepositoryClient(http_client)
+        repository = parse_github_repository_url("https://github.com/acme/widget")
+        snapshot = await service.inspect(repository)
+
+    assert {node.module_name for node in snapshot.architecture_nodes} == {
+        "pkg",
+        "pkg.core",
+        "pkg.service",
+    }
+    assert len(snapshot.architecture_edges) == 1
+    edge = snapshot.architecture_edges[0]
+    assert edge.source_module == "pkg.service"
+    assert edge.target_module == "pkg.core"
+    assert edge.source_path == "src/pkg/service.py"
+    assert edge.line_number == 1
+    assert edge.commit_sha == snapshot.commit_sha
+    assert edge.extraction_method == "python_ast_import_analyzer"
