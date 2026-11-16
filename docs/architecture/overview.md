@@ -43,8 +43,8 @@ Facts must be traceable to repository evidence. Avoid presenting inferred archit
 ## Ingestion implementation boundaries
 
 - GitHub REST calls use explicit connect/request timeouts and map missing repositories, rate limits, and upstream failures to controlled API errors.
-- The initial tree response is capped at 2,000 entries; individual blobs above 1 MB are excluded from the analyzed tree inventory.
-- The current ingestion pass reads metadata and Git tree metadata only. It does not fetch file contents, follow symlinks, or execute repository code.
+- The recursive tree response is capped at 2,000 entries; individual blobs above 1 MB are excluded from the analyzed tree inventory.
+- The current ingestion pass requests the recursive commit-pinned Git tree and reads metadata only. It does not fetch file contents, follow symlinks, or execute repository code.
 - Facts are observed only when directly supported by GitHub metadata or a path in the commit-pinned tree. Architecture and dependency relationships remain future analysis stages.
 
 ## Security boundaries
