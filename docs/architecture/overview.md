@@ -25,7 +25,7 @@ Private repositories will require a GitHub App installation and explicit authori
 
 ## Software Genome record
 
-The initial schema lives in `apps/api/gitwise_api/genome.py`. A snapshot records repository identity, the resolved commit and tree SHAs, the requested ref, bounded tree inventory, architecture analysis, and evidence-linked facts.
+The initial schema lives in `apps/api/gitwise_api/genome.py`. A snapshot records repository identity, the provider's immutable repository ID when supplied, the resolved commit and tree SHAs, the requested ref, bounded tree inventory, architecture analysis, and evidence-linked facts.
 
 Each generated fact should carry:
 
@@ -59,7 +59,7 @@ The comparison engine lives in `apps/api/gitwise_api/evolution.py`. It emits det
 
 Changes retain before/after values and the evidence available on each side. Import edges carry source-path and commit provenance. Commit SHA changes alone do not count as architectural changes.
 
-The public comparison endpoint currently performs fresh ingestion for each request. It does not persist snapshots. Durable snapshot storage, background refresh, incremental history, and long-lived project memory are not implemented yet. The comparison engine does not claim runtime impact, compatibility, vulnerability, or causality.
+The public comparison endpoint currently performs fresh ingestion for each request. Snapshots are not persisted. The persistence contract is documented in [ADR 0001](decisions/0001-genome-persistence.md): immutable keys use provider repository ID, resolved commit SHA, and schema version; canonical digests exclude observation-time-only metadata; and tenant access grants remain separate from snapshot identity. The comparison engine does not claim runtime impact, compatibility, vulnerability, or causality.
 
 ## Proposed components
 
@@ -84,7 +84,7 @@ The public comparison endpoint currently performs fresh ingestion for each reque
 
 1. **Completed:** enforce upstream response-size limits, including streamed bodies without trustworthy `Content-Length` headers.
 2. **Completed:** treat invalid or unparseable Python source as an explicit architecture-analysis limitation rather than silently reporting a complete graph.
-3. Introduce durable, access-controlled, commit-addressed snapshot storage with schema-versioned records and idempotent writes.
+3. **Completed foundation:** capture GitHub's immutable repository ID and define backend-neutral snapshot keys and canonical content digests. **Next:** implement transactional PostgreSQL storage with access-grant enforcement.
 4. Add incremental refresh and efficient comparison over stored observations.
 5. Expand conservative architecture analysis beyond Python, with explicit per-language completeness.
 6. Build evidence navigation and project overview workflows on top of the stable Genome API.
