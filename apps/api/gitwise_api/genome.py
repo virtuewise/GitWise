@@ -64,6 +64,26 @@ class RepositoryTreeEntry(BaseModel):
     mode: str | None = None
 
 
+class ArchitectureNode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    module_name: str
+    source_path: str
+    language: Literal["python"] = "python"
+
+
+class ArchitectureEdge(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_module: str
+    target_module: str
+    relationship: Literal["imports"] = "imports"
+    source_path: str
+    line_number: int = Field(ge=1)
+    commit_sha: str = Field(min_length=7)
+    extraction_method: str = "python_ast_import_analyzer"
+
+
 class SoftwareGenomeSnapshot(BaseModel):
     schema_version: Literal["1.0"] = "1.0"
     repository: str
