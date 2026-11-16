@@ -277,3 +277,29 @@ def test_rejects_non_integer_installation_identity_fields() -> None:
                     await app.verify_installation(456)
 
     asyncio.run(exercise())
+
+def test_repository_identity_rejects_boolean_numeric_ids() -> None:
+    async def exercise() -> None:
+        private_pem, _ = make_app_key()
+        async with httpx.AsyncClient(
+            base_url="https://api.github.com",
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(500)
+            ),
+        ) as http_client:
+            app = GitHubAppClient(
+                app_id=123,
+                private_key=private_pem,
+                client=http_client,
+            )
+            with pytest.raises(ValueError, match="positive integer"):
+                await app.create_repository_scoped_token(
+                    456,
+                    repository_id=True,
+                    owner="acme",
+                    repository_name="service-api",
+                )
+            with pytest.raises(ValueError, match="positive integer"):
+                await app.verify_installation(True)
+
+    asyncio.run(exercise())
