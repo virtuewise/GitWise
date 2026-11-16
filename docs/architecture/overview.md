@@ -12,7 +12,7 @@ The first vertical slice is implemented as a read-only public-repository inspect
 2. Validate and normalize the URL (allow only GitHub repository URLs; reject credentials, arbitrary hosts, and non-repository paths).
 3. Retrieve repository metadata and a bounded file tree through GitHub's API.
 4. Identify project manifests and documentation (for example README, pyproject.toml, package.json, go.mod, Cargo.toml).
-5. Pin the snapshot to the default-branch commit SHA.
+5. Pin the snapshot to the default-branch commit SHA, or to an explicitly requested branch, tag, or commit ref.
 6. Produce a versioned Software Genome with evidence-linked observed facts.
 7. Expose the snapshot through `POST /repositories/inspect`.
 
@@ -52,13 +52,13 @@ Facts must be traceable to repository evidence. Avoid presenting inferred archit
 
 ## Genome evolution foundation
 
-The initial comparison engine lives in `apps/api/gitwise_api/evolution.py`. It compares two already-produced Software Genome snapshots for the same repository and emits deterministic added, removed, and changed records for:
+The comparison engine lives in `apps/api/gitwise_api/evolution.py`. `POST /repositories/compare` accepts a repository URL plus explicit `base_ref` and `head_ref` values, ingests both refs independently, pins each observation to the resolved commit SHA, and emits deterministic added, removed, and changed records for:
 
 - Python architecture modules.
 - Commit-pinned Python import relationships.
 - Declared dependencies, keyed by manifest path, ecosystem, normalized package name, and declaration group.
 
-Changes retain before/after values and the evidence available on each side. Import edges carry source-path and commit provenance. The comparison engine does not claim runtime impact, compatibility, vulnerability, or causality. It is currently a pure in-process capability: snapshot persistence, historical ref ingestion, and a public comparison API are not implemented yet.
+Changes retain before/after values and the evidence available on each side. Import edges carry source-path and commit provenance. The comparison engine does not claim runtime impact, compatibility, vulnerability, or causality. Ref inspection is also available through the optional `ref` field on `POST /repositories/inspect`. Comparisons are computed from fresh observations and are not persisted. Durable snapshot storage, background refresh, and long-lived project history are not implemented yet.
 
 ## Security boundaries
 
