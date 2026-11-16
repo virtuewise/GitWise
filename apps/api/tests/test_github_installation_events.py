@@ -2,13 +2,11 @@ import asyncio
 from contextlib import asynccontextmanager
 
 import pytest
-
 from gitwise_api.github_app import GitHubAppInstallation, GitHubInstallationToken
 from gitwise_api.github_installation_events import (
     GitHubInstallationEventError,
     process_installation_event,
 )
-
 
 INSTALLATION = GitHubAppInstallation(
     installation_id=456,
@@ -167,15 +165,6 @@ def test_created_installation_provisions_only_verified_repositories() -> None:
     asyncio.run(exercise())
 
 
-@pytest.mark.parametrize(
-    "installation",
-    [
-        {"id": True, "app_id": 123},
-        {"id": 456, "app_id": "123"},
-        {"id": 456, "app_id": 999},
-    ],
-)
-
 def test_unsuspend_reconciles_current_installation_repositories() -> None:
     async def exercise() -> None:
         app = FakeGitHubApp()
@@ -194,6 +183,7 @@ def test_unsuspend_reconciles_current_installation_repositories() -> None:
         assert grants.reconciliations == [(9001, 9003)]
 
     asyncio.run(exercise())
+
 
 def test_delayed_suspend_event_does_not_revoke_active_installation() -> None:
     async def exercise() -> None:
@@ -249,6 +239,15 @@ def test_currently_suspended_installation_revokes_all_grants() -> None:
 
     asyncio.run(exercise())
 
+
+@pytest.mark.parametrize(
+    "installation",
+    [
+        {"id": True, "app_id": 123},
+        {"id": 456, "app_id": "123"},
+        {"id": 456, "app_id": 999},
+    ],
+)
 def test_rejects_untrusted_installation_identity(installation) -> None:
     async def exercise() -> None:
         with pytest.raises(GitHubInstallationEventError):
