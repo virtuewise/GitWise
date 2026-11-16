@@ -84,7 +84,8 @@ async def _verify_repositories(
         if (
             len(token.repositories) != 1
             or token.repositories[0].get("id") != repository_id
-            or token.repositories[0].get("full_name", "").casefold()
+            or not isinstance(token.repositories[0].get("full_name"), str)
+            or token.repositories[0]["full_name"].casefold()
             != f"{owner}/{repository_name}".casefold()
             or token.permissions.get("contents") != "read"
         ):
