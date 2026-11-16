@@ -20,8 +20,11 @@ def make_snapshot(*, generated_at: datetime, repository_id: int = 42) -> Softwar
             GenomeFact.observed(
                 repository="acme/widget",
                 commit_sha="ABCDEF1234567",
-                fact_type="repository.primary_language",
-                value="Python",
+                fact_type="project.configuration",
+                value={"language": "Python"},
+                source_path="pyproject.toml",
+                source_url="https://github.com/acme/widget/blob/ABCDEF1234567/pyproject.toml",
+                extraction_method="manifest_parser",
             )
         ],
     )
@@ -49,10 +52,41 @@ def test_content_digest_ignores_observation_timestamps() -> None:
     assert snapshot_content_digest(first) == snapshot_content_digest(second)
 
 
-def test_content_digest_changes_when_observed_content_changes() -> None:
+def test_content_digest_ignores_mutable_repository_metadata_and_ref() -> None:
     first = make_snapshot(generated_at=datetime(2026, 1, 1, tzinfo=UTC))
     second = make_snapshot(generated_at=datetime(2026, 1, 1, tzinfo=UTC))
-    second.description = "Updated description"
+    second.repository = "new-owner/renamed-widget"
+    second.repository_url = "https://github.com/new-owner/renamed-widget"
+    second.description = "A changed description"
+    second.default_branch = "trunk"
+    second.requested_ref = "release/v2"
+    second.primary_language = "Rust"
+    second.is_private = True
+    second.facts.append(GenomeFact.observed(
+        repository="new-owner/renamed-widget",
+        commit_sha=second.commit_sha,
+        fact_type="repository.description",
+        value="A changed description",
+    ))
+
+    assert snapshot_content_digest(first) == snapshot_content_digest(second)
+
+
+def test_content_digest_ignores_fact_ids_and_mutable_source_urls() -> None:
+    first = make_snapshot(generated_at=datetime(2026, 1, 1, tzinfo=UTC))
+    second = make_snapshot(generated_at=datetime(2026, 1, 1, tzinfo=UTC))
+    second.facts[0].fact_id = "different-id"
+    second.facts[0].evidence[0].source_url = (
+        "https://github.com/renamed-owner/renamed-repo/blob/ABCDEF1234567/pyproject.toml"
+    )
+
+    assert snapshot_content_digest(first) == snapshot_content_digest(second)
+
+
+def test_content_digest_changes_when_commit_derived_content_changes() -> None:
+    first = make_snapshot(generated_at=datetime(2026, 1, 1, tzinfo=UTC))
+    second = make_snapshot(generated_at=datetime(2026, 1, 1, tzinfo=UTC))
+    second.facts[0].value = {"language": "Python", "dependencies": ["httpx>=0.27"]}
 
     assert snapshot_content_digest(first) != snapshot_content_digest(second)
 
@@ -60,13 +94,20 @@ def test_content_digest_changes_when_observed_content_changes() -> None:
 def test_content_digest_is_independent_of_collection_order() -> None:
     first = make_snapshot(generated_at=datetime(2026, 1, 1, tzinfo=UTC))
     second = make_snapshot(generated_at=datetime(2026, 1, 1, tzinfo=UTC))
-    first.facts.append(GenomeFact.observed(
+    extra_first = GenomeFact.observed(
         repository="acme/widget",
         commit_sha=first.commit_sha,
-        fact_type="repository.description",
-        value="A widget",
-    ))
-    second.facts = list(reversed(first.facts))
+        fact_type="project.manifest",
+        value="package.json",
+    )
+    extra_second = GenomeFact.observed(
+        repository="acme/widget",
+        commit_sha=second.commit_sha,
+        fact_type="project.manifest",
+        value="package.json",
+    )
+    first.facts.append(extra_first)
+    second.facts = [extra_second, second.facts[0]]
 
     assert snapshot_content_digest(first) == snapshot_content_digest(second)
 
@@ -78,6 +119,19 @@ def test_content_digest_preserves_order_inside_fact_values() -> None:
     second.facts[0].value = ["package", "test", "compile"]
 
     assert snapshot_content_digest(first) != snapshot_content_digest(second)
+
+
+def make_snapshot_with_fact(fact: GenomeFact) -> SoftwareGenomeSnapshot:
+    return SoftwareGenomeSnapshot(
+        repository="acme/widget",
+        repository_url="https://github.com/acme/widget",
+        provider_repository_id=42,
+        default_branch="main",
+        commit_sha="ABCDEF1234567",
+        tree_sha="tree1234567",
+        is_private=False,
+        facts=[fact],
+    )
 
 
 def test_fact_identity_is_independent_of_mapping_insertion_order() -> None:
@@ -92,19 +146,6 @@ def test_fact_identity_is_independent_of_mapping_insertion_order() -> None:
     assert first.fact_id == second.fact_id
     assert snapshot_content_digest(make_snapshot_with_fact(first)) == snapshot_content_digest(
         make_snapshot_with_fact(second)
-    )
-
-
-def make_snapshot_with_fact(fact: GenomeFact) -> SoftwareGenomeSnapshot:
-    return SoftwareGenomeSnapshot(
-        repository="acme/widget",
-        repository_url="https://github.com/acme/widget",
-        provider_repository_id=42,
-        default_branch="main",
-        commit_sha="ABCDEF1234567",
-        tree_sha="tree1234567",
-        is_private=False,
-        facts=[fact],
     )
 
 
