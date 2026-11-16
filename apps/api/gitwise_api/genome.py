@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Literal
 
@@ -26,7 +26,7 @@ class GenomeFact(BaseModel):
     evidence: list[GenomeEvidence] = Field(default_factory=list)
     confidence: float = Field(ge=0, le=1)
     verification_status: Literal["observed", "inferred"]
-    observed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    observed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod
     def observed(
@@ -75,4 +75,4 @@ class SoftwareGenomeSnapshot(BaseModel):
     files_analyzed: int = 0
     tree: list[RepositoryTreeEntry] = Field(default_factory=list)
     facts: list[GenomeFact] = Field(default_factory=list)
-    generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
