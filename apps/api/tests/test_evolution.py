@@ -165,3 +165,20 @@ def test_ignores_non_dependency_facts() -> None:
     )]
 
     assert compare_genomes(base, head).changes == []
+
+
+def test_unchanged_import_is_not_reported_as_changed_only_because_commit_advanced() -> None:
+    base = snapshot("base1234567")
+    head = snapshot("head1234567")
+    for target, commit in ((base, base.commit_sha), (head, head.commit_sha)):
+        target.architecture_edges = [ArchitectureEdge(
+            source_module="pkg.service",
+            target_module="pkg.core",
+            source_path="src/pkg/service.py",
+            line_number=4,
+            commit_sha=commit,
+        )]
+
+    result = compare_genomes(base, head)
+
+    assert result.changes == []
