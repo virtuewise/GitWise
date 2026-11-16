@@ -20,7 +20,7 @@ See [the detailed roadmap](docs/roadmap.md) for scope, acceptance goals, and del
 
 ## Current project status
 
-GitWise is at the foundation stage, building Phase 1. `POST /repositories/inspect` resolves a public GitHub repository and returns a bounded, commit-pinned Software Genome snapshot. Supply an optional `ref` to inspect a branch, tag, or commit. `POST /repositories/compare` accepts `base_ref` and `head_ref` and compares the two freshly ingested snapshots across supported Python architecture relationships and declared dependencies. The service statically parses selected files; it does not execute repository code. Snapshot persistence and durable project history are not implemented yet.
+GitWise is at the foundation stage, building Phase 1. `POST /repositories/inspect` resolves a public GitHub repository and returns a bounded, commit-pinned Software Genome snapshot. Supply an optional `ref` to inspect a branch, tag, or commit. `POST /repositories/compare` accepts `base_ref` and `head_ref` and compares the two freshly ingested snapshots across supported Python architecture relationships and declared dependencies. The service statically parses selected files; it does not execute repository code. Snapshots are not stored yet; the repository now defines a stable immutable-snapshot identity and persistence contract as the foundation for that work.
 
 ## Product principles
 
