@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import base64
 import json
 import re
@@ -21,7 +22,7 @@ MAX_TREE_ENTRIES = 2_000
 MAX_FILE_SIZE_BYTES = 1_000_000
 MAX_MANIFESTS_TO_READ = 40
 MAX_TOTAL_MANIFEST_BYTES = 5_000_000
-MAX_DEPENDENCY_FACTS = 1_000
+MAX_DEPENDENCY_FACTS = 1_000\nMAX_PYTHON_FILES_TO_READ = 100\nMAX_PYTHON_FILE_SIZE_BYTES = 256_000\nMAX_TOTAL_PYTHON_BYTES = 2_000_000
 MANIFESTS = {
     "pyproject.toml": "python",
     "requirements.txt": "python",
@@ -42,7 +43,7 @@ MANIFESTS = {
 
 
 class GitHubRepositoryClient:
-    """Small read-only GitHub API client. Repository code is never downloaded or executed."""
+    """Read-only GitHub API client. Repository code is parsed statically and never executed."""
 
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
         self._client = client or httpx.AsyncClient(
@@ -341,6 +342,98 @@ class GitHubRepositoryClient:
                 dependency_facts_emitted += 1
             if dependency_facts_emitted >= MAX_DEPENDENCY_FACTS:
                 break
+
+        python_sources = sorted(
+            (
+                entry for entry in blob_entries.values()
+                if entry.path.endswith(".py")
+                and entry.size is not None
+                and entry.size <= MAX_PYTHON_FILE_SIZE_BYTES
+                and module_name_for_path(entry.path) is not None
+            ),
+            key=lambda entry: entry.path,
+        )[:MAX_PYTHON_FILES_TO_READ]
+
+        module_by_path = {
+            entry.path: module_name_for_path(entry.path)
+            for entry in python_sources
+        }
+        module_paths: dict[str, list[str]] = {}
+        for source_path, module_name in module_by_path.items():
+            if module_name is not None:
+                module_paths.setdefault(module_name, []).append(source_path)
+
+        architecture_nodes = [
+            ArchitectureNode(module_name=module_name, source_path=source_path)
+            for source_path, module_name in module_by_path.items()
+            if module_name is not None
+        ]
+        architecture_edges: list[ArchitectureEdge] = []
+        total_python_bytes = 0
+        for entry in python_sources:
+            if entry.size is None or total_python_bytes + entry.size > MAX_TOTAL_PYTHON_BYTES:
+                break
+            blob_payload = await self._get(
+                f"{base}/git/blobs/{quote(entry.sha, safe='')}"
+            )
+            encoded = blob_payload.get("content")
+            if not isinstance(encoded, str) or blob_payload.get("encoding") != "base64":
+                continue
+            try:
+                raw_content = base64.b64decode(
+                    re.sub(r"\\s+", "", encoded),
+                    validate=True,
+                )
+                if len(raw_content) > MAX_PYTHON_FILE_SIZE_BYTES:
+                    continue
+                declared_size = blob_payload.get("size")
+                if isinstance(declared_size, int) and declared_size != len(raw_content):
+                    continue
+                source = raw_content.decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                continue
+
+            total_python_bytes += len(raw_content)
+            source_module = module_by_path[entry.path]
+            if source_module is None:
+                continue
+            for imported in extract_python_imports(source, source_module, entry.path):
+                candidates = [
+                    imported.target_module,
+                    *(
+                        ".".join(imported.target_module.split(".")[:index])
+                        for index in range(len(imported.target_module.split(".")) - 1, 0, -1)
+                    ),
+                ]
+                target_module = next(
+                    (
+                        candidate for candidate in candidates
+                        if len(module_paths.get(candidate, [])) == 1
+                    ),
+                    None,
+                )
+                if target_module is None or target_module == source_module:
+                    continue
+                architecture_edges.append(
+                    ArchitectureEdge(
+                        source_module=source_module,
+                        target_module=target_module,
+                        source_path=entry.path,
+                        line_number=imported.line_number,
+                        commit_sha=commit_sha,
+                    )
+                )
+
+        unique_edges = {
+            (
+                edge.source_module,
+                edge.target_module,
+                edge.source_path,
+                edge.line_number,
+            ): edge
+            for edge in architecture_edges
+        }
+        architecture_edges = list(unique_edges.values())
 
         blob_paths = {entry.path for entry in entries if entry.kind == "blob"}
         for manifest, ecosystem in MANIFESTS.items():
