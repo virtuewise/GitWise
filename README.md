@@ -20,7 +20,7 @@ See [the detailed roadmap](docs/roadmap.md) for scope, acceptance goals, and del
 
 ## Current project status
 
-GitWise is at the foundation stage, building Phase 1. `POST /repositories/inspect` resolves a public GitHub repository and returns a bounded, commit-pinned Software Genome snapshot. Supply an optional `ref` to inspect a branch, tag, or commit. `POST /repositories/compare` accepts `base_ref` and `head_ref` and compares the two freshly ingested snapshots across supported Python architecture relationships and declared dependencies. The service statically parses selected files; it does not execute repository code. Snapshots are not stored yet; the repository now defines a stable immutable-snapshot identity and persistence contract as the foundation for that work.
+GitWise is at the foundation stage, building Phase 1. `POST /repositories/inspect` resolves a public GitHub repository and returns a bounded, commit-pinned Software Genome snapshot. Supply an optional `ref` to inspect a branch, tag, or commit. `POST /repositories/compare` accepts `base_ref` and `head_ref` and compares the two freshly ingested snapshots across supported Python architecture relationships and declared dependencies. The service statically parses selected files; it does not execute repository code. Snapshots are not yet exposed through the API. The repository now includes an initial PostgreSQL migration and a grant-checked transactional store for immutable snapshots; authenticated grant provisioning and production database deployment remain unfinished.
 
 ## Product principles
 
@@ -63,6 +63,18 @@ The API will be available at http://127.0.0.1:8000 and its OpenAPI docs at http:
 ## Configuration
 
 Copy `.env.example` to `.env` and configure values as needed. Never commit tokens, private keys, or repository credentials.
+
+## PostgreSQL snapshot storage
+
+The first persistence migration creates provider repository records, revocable GitHub-user/App-installation access grants, and immutable Software Genome snapshots. The transactional store requires an active `write` or `admin` grant and treats a repeated identical write as idempotent; a different digest for the same snapshot identity is a conflict.
+
+Configure `GITWISE_DATABASE_URL` with a PostgreSQL `asyncpg` URL, then apply the schema with:
+
+```bash
+alembic upgrade head
+```
+
+The migration and store are foundations only: no authenticated API endpoint provisions grants or exposes historical snapshots yet. Do not create grants directly from unverified request data, and do not enable private-repository ingestion until GitHub identity/installation verification, grant provisioning, revocation, and tenant-isolation tests are implemented.
 
 ## Security
 
