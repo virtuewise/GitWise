@@ -24,6 +24,11 @@ async def test_inspect_builds_commit_pinned_genome_snapshot() -> None:
                 "commit": {"tree": {"sha": "tree1234567"}},
             }
         },
+        "/repos/acme/widget/git/blobs/manifest12": {
+            "encoding": "base64",
+            "content": "W3Byb2plY3Rd",
+            "size": 12,
+        },
         "/repos/acme/widget/git/trees/tree1234567": {
             "truncated": False,
             "tree": [
