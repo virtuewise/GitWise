@@ -62,10 +62,10 @@ Define retention per repository owner before production storage. Deletion must r
 1. **Completed:** expose GitHub's immutable numeric repository ID in new Software Genome snapshots.
 2. **Completed:** add backend-neutral canonical snapshot keys and content digests, with timestamp/order invariance tests; preserve semantically ordered arrays inside fact values.
 3. **Implemented, integration verification in CI:** PostgreSQL migrations define provider repositories, revocable principal grants, and immutable snapshots. The transactional insert-if-absent store requires an active write grant and rejects digest conflicts. CI provisions PostgreSQL 16, applies the migrations, and exercises authorization denial, idempotent writes, digest conflicts, and database-enforced immutability. The store is not yet wired to an authenticated API or deployed database.
-4. **Foundation implemented:** verify GitHub App installation ownership and one-repository immutable identity; provision idempotent read-only grants; revoke selected repositories or all grants for an installation; test overlapping installation principals in PostgreSQL. Next: connect signed lifecycle events to these primitives with recoverable, idempotent processing and cross-tenant authorization tests before exposing snapshot operations.
+4. **Implemented:** verify GitHub App installation ownership and one-repository immutable identity; process signed installation create/delete/suspend/unsuspend and repository add/remove events; provision idempotent read-only grants; atomically reconcile repository additions/removals; revoke all grants on deletion/suspension; and test overlapping installation principals in PostgreSQL. **Next:** authenticate user-to-installation ownership and prove cross-tenant isolation before exposing snapshot operations.
 5. Add retention, deletion, audit, and installation-revocation workflows.
 6. Add historical retrieval and comparisons over stored snapshots; then add incremental refresh.
 
 ## Explicit non-goals
 
-This decision does not add database dependencies, credentials, private-repository access, background workers, or a public historical API. Those capabilities should ship only with their operational and security controls.
+This decision does not enable private-repository ingestion or a public historical API. Those capabilities should ship only with authenticated user-to-installation ownership, cross-tenant authorization, retention, and operational controls.
