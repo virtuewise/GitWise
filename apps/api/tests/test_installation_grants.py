@@ -135,6 +135,9 @@ def test_installation_advisory_lock_serializes_workers() -> None:
             await asyncio.gather(first_task, second_task)
         finally:
             release_first.set()
+            for task in (first_task, second_task):
+                if not task.done():
+                    task.cancel()
             await asyncio.gather(first_task, second_task, return_exceptions=True)
             await store.close()
 
