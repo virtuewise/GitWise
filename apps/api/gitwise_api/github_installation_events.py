@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from typing import Any
 
 from gitwise_api.github_app import (
-    GitHubAppAuthenticationError,
     GitHubAppClient,
     GitHubAppInstallation,
 )
