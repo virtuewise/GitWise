@@ -1,4 +1,4 @@
-"""Verify GitHub user identity and the installations visible to that user."""
+"""Verify GitHub user identity and installations visible to a GitHub App user access token."""
 
 from __future__ import annotations
 
@@ -21,8 +21,9 @@ class VerifiedGitHubUser:
 class GitHubUserClient:
     """Resolve a user identity from an OAuth token held by a trusted session.
 
-    The access token must come from a server-managed OAuth session. Never accept
-    it as a repository request parameter, log it, or persist it in the Genome.
+    The access token must be issued for the GitWise GitHub App and come from a
+    server-managed user authorization session. Never accept it as a repository
+    request parameter, log it, or persist it in the Genome.
     """
 
     MAX_INSTALLATIONS = 1000
@@ -34,7 +35,7 @@ class GitHubUserClient:
         client: httpx.AsyncClient | None = None,
     ) -> None:
         if not isinstance(access_token, str) or not access_token.strip():
-            raise ValueError("A GitHub OAuth access token is required.")
+            raise ValueError("A GitHub App user access token is required.")
         self._access_token = access_token
         self._client = client or httpx.AsyncClient(
             base_url="https://api.github.com",
