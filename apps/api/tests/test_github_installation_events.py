@@ -27,6 +27,13 @@ class FakeGitHubApp:
         self.verified.append(installation_id)
         return INSTALLATION
 
+    async def list_installation_repositories(self, installation_id):
+        self.verified.append(installation_id)
+        return INSTALLATION, (
+            {"id": 9001, "full_name": "acme/api", "private": True},
+            {"id": 9003, "full_name": "acme/web", "private": False},
+        )
+
     async def create_repository_scoped_token(
         self,
         installation_id: int,
@@ -56,6 +63,7 @@ class FakeGrantStore:
         self.revoked: list[tuple[int, tuple[int, ...]]] = []
         self.installation_revocations: list[int] = []
         self.atomic_changes: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
+        self.reconciliations: list[tuple[int, ...]] = []
 
     async def grant_repositories(self, installation, repositories):
         self.granted.append(tuple(item["id"] for item in repositories))
@@ -68,6 +76,11 @@ class FakeGrantStore:
         removals = tuple(repository_ids_to_revoke)
         self.atomic_changes.append((additions, removals))
         return len(additions), len(removals)
+
+    async def reconcile_installation_repositories(self, installation, repositories):
+        values = tuple(item["id"] for item in repositories)
+        self.reconciliations.append(values)
+        return len(values), 1
 
     async def revoke_repositories(self, installation_id, repository_ids):
         values = tuple(repository_ids)
@@ -265,7 +278,7 @@ def test_rejects_repository_identity_mismatch_from_token_exchange() -> None:
 
     asyncio.run(exercise())
 
-def test_all_to_selected_scope_change_revokes_old_grants_fail_closed() -> None:
+def test_all_to_selected_scope_change_preserves_currently_selected_repositories() -> None:
     async def exercise() -> None:
         app = FakeGitHubApp()
         grants = FakeGrantStore()
@@ -282,8 +295,10 @@ def test_all_to_selected_scope_change_revokes_old_grants_fail_closed() -> None:
             app=app,
             grants=grants,
         )
-        assert result == "revoked:2"
-        assert grants.installation_revocations == [456]
+        assert result == "reconciled:2;revoked:1"
+        assert app.verified == [456]
+        assert grants.reconciliations == [(9001, 9003)]
+        assert grants.installation_revocations == []
         assert grants.atomic_changes == []
 
     asyncio.run(exercise())
