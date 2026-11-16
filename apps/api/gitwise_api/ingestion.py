@@ -11,6 +11,7 @@ from fastapi import HTTPException, status
 
 from gitwise_api.architecture import extract_python_imports, module_name_for_path
 from gitwise_api.genome import (
+    ArchitectureAnalysis,
     ArchitectureEdge,
     ArchitectureNode,
     GenomeFact,
@@ -348,17 +349,39 @@ class GitHubRepositoryClient:
             if dependency_facts_emitted >= MAX_DEPENDENCY_FACTS:
                 break
 
-        python_sources = sorted(
+        python_tree_entries = [
+            item for item in raw_tree
+            if isinstance(item, dict)
+            and isinstance(item.get("path"), str)
+            and item["path"].endswith(".py")
+        ]
+        python_discovered = len(python_tree_entries)
+        python_candidates = sorted(
             (
                 entry for entry in blob_entries.values()
                 if entry.path.endswith(".py")
-                and entry.size is not None
-                and entry.size <= MAX_PYTHON_FILE_SIZE_BYTES
                 and module_name_for_path(entry.path) is not None
             ),
             key=lambda entry: entry.path,
-        )[:MAX_PYTHON_FILES_TO_READ]
-
+        )
+        eligible_python_sources = [
+            entry for entry in python_candidates
+            if entry.size is not None and entry.size <= MAX_PYTHON_FILE_SIZE_BYTES
+        ]
+        python_sources = eligible_python_sources[:MAX_PYTHON_FILES_TO_READ]
+        architecture_limitations: set[str] = set()
+        if bool(tree_payload.get("truncated")) or len(raw_tree) > MAX_TREE_ENTRIES:
+            architecture_limitations.add("repository_tree_truncated")
+        if len(eligible_python_sources) > MAX_PYTHON_FILES_TO_READ:
+            architecture_limitations.add("max_python_files")
+        if len(python_candidates) < python_discovered or any(
+            not isinstance(item.get("size"), int)
+            or isinstance(item.get("size"), bool)
+            or item.get("size", 0) > MAX_PYTHON_FILE_SIZE_BYTES
+            for item in python_tree_entries
+        ):
+            architecture_limitations.add("python_file_size_or_metadata")
+        
         module_by_path = {
             entry.path: module_name_for_path(entry.path)
             for entry in python_sources
@@ -375,30 +398,40 @@ class GitHubRepositoryClient:
         ]
         architecture_edges: list[ArchitectureEdge] = []
         total_python_bytes = 0
+        python_files_analyzed = 0
         for entry in python_sources:
             if entry.size is None or total_python_bytes + entry.size > MAX_TOTAL_PYTHON_BYTES:
+                architecture_limitations.add("max_total_python_bytes")
                 break
             blob_payload = await self._get(
                 f"{base}/git/blobs/{quote(entry.sha, safe='')}"
             )
             encoded = blob_payload.get("content")
             if not isinstance(encoded, str) or blob_payload.get("encoding") != "base64":
+                architecture_limitations.add("unreadable_python_blob")
                 continue
             try:
                 raw_content = base64.b64decode(
-                    re.sub(r"\s+", "", encoded),
+                    re.sub(r"\\s+", "", encoded),
                     validate=True,
                 )
                 if len(raw_content) > MAX_PYTHON_FILE_SIZE_BYTES:
+                    architecture_limitations.add("python_file_size_or_metadata")
                     continue
                 declared_size = blob_payload.get("size")
-                if isinstance(declared_size, int) and declared_size != len(raw_content):
+                if not isinstance(declared_size, int) or declared_size != len(raw_content):
+                    architecture_limitations.add("python_blob_size_mismatch")
                     continue
                 source = raw_content.decode("utf-8")
             except (ValueError, UnicodeDecodeError):
+                architecture_limitations.add("unreadable_python_blob")
                 continue
 
+            if total_python_bytes + len(raw_content) > MAX_TOTAL_PYTHON_BYTES:
+                architecture_limitations.add("max_total_python_bytes")
+                break
             total_python_bytes += len(raw_content)
+            python_files_analyzed += 1
             source_module = module_by_path[entry.path]
             if source_module is None:
                 continue
@@ -439,6 +472,13 @@ class GitHubRepositoryClient:
             for edge in architecture_edges
         }
         architecture_edges = list(unique_edges.values())
+        architecture_analysis = ArchitectureAnalysis(
+            status="partial" if architecture_limitations else "complete",
+            files_discovered=python_discovered,
+            files_selected=len(python_sources),
+            files_analyzed=python_files_analyzed,
+            limitations=sorted(architecture_limitations),
+        )
 
         blob_paths = {entry.path for entry in entries if entry.kind == "blob"}
         for manifest, ecosystem in MANIFESTS.items():
@@ -485,6 +525,7 @@ class GitHubRepositoryClient:
             truncated=bool(tree_payload.get("truncated")) or len(raw_tree) > MAX_TREE_ENTRIES,
             files_analyzed=sum(entry.kind == "blob" for entry in entries),
             tree=entries,
+            architecture_analysis=architecture_analysis,
             architecture_nodes=architecture_nodes,
             architecture_edges=architecture_edges,
             facts=facts,
