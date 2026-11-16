@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     app_name: str = "GitWise API"
     environment: str = "development"
     log_level: str = "INFO"
+    database_url: str | None = None
+    github_webhook_secret: str | None = None
 
     model_config = SettingsConfigDict(
         env_prefix="GITWISE_",
