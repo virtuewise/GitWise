@@ -88,9 +88,9 @@ class GitHubAppClient:
         try:
             payload = response.json()
             account = payload["account"]
-            returned_installation_id = int(payload["id"])
-            returned_app_id = int(payload["app_id"])
-            account_id = int(account["id"])
+            returned_installation_id = payload["id"]
+            returned_app_id = payload["app_id"]
+            account_id = account["id"]
             account_login = account["login"]
             target_type = payload["target_type"]
             repository_selection = payload["repository_selection"]
@@ -100,7 +100,10 @@ class GitHubAppClient:
             ) from exc
 
         if (
-            returned_installation_id != installation_id
+            type(returned_installation_id) is not int
+            or type(returned_app_id) is not int
+            or type(account_id) is not int
+            or returned_installation_id != installation_id
             or returned_app_id != self._app_id
             or account_id < 1
             or not isinstance(account_login, str)
@@ -168,7 +171,7 @@ class GitHubAppClient:
             or not repositories_payload
             or any(
                 not isinstance(item, dict)
-                or not isinstance(item.get("id"), int)
+                or type(item.get("id")) is not int
                 or item["id"] < 1
                 or not isinstance(item.get("full_name"), str)
                 or item["full_name"].count("/") != 1
