@@ -30,7 +30,7 @@ class SnapshotWriteResult:
 
 
 class GenomeSnapshotStore:
-    """Persist snapshots only for principals with an active repository write grant.
+    """Persist immutable snapshots and enforce active repository grants on access.
 
     Grant provisioning is deliberately outside this class: only a verified
     GitHub identity/installation flow may create or revoke access grants.
