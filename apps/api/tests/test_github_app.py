@@ -477,7 +477,7 @@ def test_repository_scoped_token_rejects_extra_permissions() -> None:
                 client=http_client,
             )
             with pytest.raises(
-                GitHubAppAuthenticationError, match="repository identity"
+                GitHubAppAuthenticationError, match="permission scope"
             ):
                 await app.create_repository_scoped_token(
                     456,
