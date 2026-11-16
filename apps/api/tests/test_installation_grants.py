@@ -35,9 +35,6 @@ def test_installation_grants_are_idempotent_and_isolated() -> None:
             repository_selection="selected",
         )
         store = InstallationGrantStore.from_url(DATABASE_URL)
-        from sqlalchemy.ext.asyncio import create_async_engine
-
-        engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
         try:
             first_repositories = [
                 {
@@ -67,7 +64,7 @@ def test_installation_grants_are_idempotent_and_isolated() -> None:
             )
             assert revoked == 1
 
-            async with engine.connect() as connection:
+            async with store._engine.connect() as connection:
                 active = await connection.execute(
                     text("""
                         SELECT principal_id, provider_repository_id
@@ -94,7 +91,7 @@ def test_installation_grants_are_idempotent_and_isolated() -> None:
             assert await store.revoke_installation(first_installation_id) == 1
             assert await store.revoke_installation(second_installation_id) == 1
         finally:
-            async with engine.begin() as connection:
+            async with store._engine.begin() as connection:
                 await connection.execute(
                     text("""
                         DELETE FROM provider_repositories
@@ -106,6 +103,6 @@ def test_installation_grants_are_idempotent_and_isolated() -> None:
                         "repo_two": second_repository_id,
                     },
                 )
-            await engine.dispose()
+            await store._engine.dispose()
 
     asyncio.run(exercise())
