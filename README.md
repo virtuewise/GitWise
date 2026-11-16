@@ -84,7 +84,7 @@ Configure `GITWISE_DATABASE_URL` with a PostgreSQL `asyncpg` URL, then apply the
 alembic upgrade head
 ```
 
-The snapshot store remains separate from the webhook grant lifecycle. Its internal read methods enforce active grants, including reads through installation IDs returned by the verified GitHub user client. No OAuth login/session or authenticated API endpoint exposes historical snapshots yet; the API must obtain user tokens from a server-managed session and derive principal identity from GitHub, never from request parameters. Do not create grants directly from unverified request data. Private-repository ingestion and historical Genome retrieval remain disabled until tenant-isolation authorization tests and authenticated user-to-installation ownership rules are implemented.
+The snapshot store remains separate from the webhook grant lifecycle. Its internal read methods enforce active grants, including reads through installation IDs returned by the verified GitHub user client. No GitHub App user authorization/session or authenticated API endpoint exposes historical snapshots yet; the API must obtain a GitWise App user access token from a server-managed session and derive principal identity from GitHub, never from request parameters. Do not create grants directly from unverified request data. Private-repository ingestion and historical Genome retrieval remain disabled until tenant-isolation authorization tests and authenticated user-to-installation ownership rules are implemented.
 
 ## Security
 
