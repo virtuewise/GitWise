@@ -53,7 +53,10 @@ def test_verifies_installation_ownership_and_scopes_token() -> None:
                     },
                 )
             assert request.method == "POST"
-            assert json.loads(request.content) == {"repositories": ["service-api"]}
+            assert json.loads(request.content) == {
+                "repositories": ["service-api"],
+                "permissions": {"contents": "read", "metadata": "read"},
+            }
             return httpx.Response(
                 201,
                 json={
