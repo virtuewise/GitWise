@@ -61,6 +61,12 @@ Changes retain before/after values and the evidence available on each side. Impo
 
 The public comparison endpoint currently performs fresh ingestion for each request. Historical retrieval is not exposed. The persistence contract is documented in [ADR 0001](decisions/0001-genome-persistence.md): immutable keys use provider repository ID, resolved commit SHA, and schema version; canonical digests exclude observation-time-only metadata; and tenant access grants remain separate from snapshot identity. The initial PostgreSQL migration (`apps/api/migrations/versions/0001_genome_history.py`) creates provider repository, revocable principal grant, and immutable snapshot tables. `GenomeSnapshotStore` requires an active write/admin grant, performs transactional insert-if-absent, and rejects digest conflicts. Snapshot rows reject updates at the database layer. Grant provisioning and authenticated API integration are intentionally not implemented yet; the store must only receive principal identities established by a verified authentication flow. The comparison engine does not claim runtime impact, compatibility, vulnerability, or causality.
 
+## GitHub webhook trust and replay protection
+
+The initial webhook security primitives live in `apps/api/gitwise_api/webhooks.py` and `apps/api/gitwise_api/webhook_deliveries.py`. Signature verification uses GitHub's SHA-256 HMAC header, the configured secret, the original raw request bytes, and constant-time comparison. It must run before JSON parsing or trusting event metadata.
+
+Verified delivery IDs can be claimed transactionally in PostgreSQL. The unique delivery key makes concurrent duplicate deliveries idempotent; reuse of the same delivery ID with a different event name or payload digest is treated as a conflict. Migration `0002_github_webhook_deliveries` creates the durable delivery ledger. These are security primitives, not yet a complete webhook endpoint: event dispatch, installation ownership verification, grant provisioning/revocation, and operational retention policy remain outstanding. Do not grant access or process installation lifecycle events until those handlers are implemented and tested.
+
 ## Proposed components
 
 - **Web client:** repository onboarding, project overview, evidence explorer.
