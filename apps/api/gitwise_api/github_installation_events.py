@@ -120,13 +120,9 @@ async def process_installation_event(
     added = _repository_candidates(payload.get("repositories_added", []))
     removed = _repository_candidates(payload.get("repositories_removed", []))
     added_verified = await _verify_repositories(app, installation, added)
-    granted = (
-        await grants.grant_repositories(installation, added_verified)
-        if added_verified
-        else 0
-    )
-    revoked = await grants.revoke_repositories(
-        installation_id,
+    granted, revoked = await grants.apply_repository_changes(
+        installation,
+        added_verified,
         [repository["id"] for repository in removed],
     )
     return f"granted:{granted};revoked:{revoked}"
