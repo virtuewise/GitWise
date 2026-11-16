@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import base64
+import json
+import re
+import tomllib
 from urllib.parse import quote
 
 import httpx
@@ -15,6 +19,8 @@ from gitwise_api.repositories import RepositoryReference
 GITHUB_API = "https://api.github.com"
 MAX_TREE_ENTRIES = 2_000
 MAX_FILE_SIZE_BYTES = 1_000_000
+MAX_MANIFESTS_TO_READ = 40
+MAX_TOTAL_MANIFEST_BYTES = 5_000_000
 MANIFESTS = {
     "pyproject.toml": "python",
     "requirements.txt": "python",
@@ -186,6 +192,136 @@ class GitHubRepositoryClient:
                 value=language,
                 source_url=repository.canonical_url,
             ))
+
+        blob_entries = {
+            entry.path: entry
+            for entry in entries
+            if entry.kind == "blob" and entry.size is not None
+        }
+        manifest_paths = sorted(
+            path
+            for path in blob_entries
+            if path.rsplit("/", 1)[-1] in {
+                "pyproject.toml",
+                "requirements.txt",
+                "package.json",
+                "Cargo.toml",
+                "go.mod",
+            }
+        )[:MAX_MANIFESTS_TO_READ]
+        total_manifest_bytes = 0
+        for path in manifest_paths:
+            entry = blob_entries[path]
+            if entry.size is None or entry.size > MAX_FILE_SIZE_BYTES:
+                continue
+            if total_manifest_bytes + entry.size > MAX_TOTAL_MANIFEST_BYTES:
+                break
+            blob_payload = await self._get(f"{base}/git/blobs/{quote(entry.sha, safe='')}")
+            encoded = blob_payload.get("content")
+            encoding = blob_payload.get("encoding")
+            if not isinstance(encoded, str) or encoding != "base64":
+                continue
+            try:
+                raw_content = base64.b64decode(encoded, validate=True)
+                if len(raw_content) > MAX_FILE_SIZE_BYTES:
+                    continue
+                text_content = raw_content.decode("utf-8")
+            except (ValueError, UnicodeDecodeError):
+                continue
+            total_manifest_bytes += len(raw_content)
+            filename = path.rsplit("/", 1)[-1]
+            dependencies: list[dict[str, str]] = []
+            try:
+                if filename == "pyproject.toml":
+                    document = tomllib.loads(text_content)
+                    project = document.get("project", {})
+                    declared = list(project.get("dependencies", []))
+                    optional = project.get("optional-dependencies", {})
+                    if isinstance(optional, dict):
+                        for group, values in optional.items():
+                            if isinstance(values, list):
+                                declared.extend(values)
+                    for requirement in declared:
+                        if isinstance(requirement, str):
+                            match = re.match(r"\s*([A-Za-z0-9_.-]+)\s*(.*)", requirement)
+                            if match:
+                                dependencies.append({
+                                    "name": match.group(1),
+                                    "constraint": match.group(2).strip(),
+                                    "ecosystem": "pypi",
+                                })
+                elif filename == "requirements.txt":
+                    for line in text_content.splitlines():
+                        candidate = line.strip()
+                        if not candidate or candidate.startswith(("#", "-")):
+                            continue
+                        match = re.match(r"([A-Za-z0-9_.-]+)\s*(.*)", candidate)
+                        if match:
+                            dependencies.append({
+                                "name": match.group(1),
+                                "constraint": match.group(2).strip(),
+                                "ecosystem": "pypi",
+                            })
+                elif filename == "package.json":
+                    document = json.loads(text_content)
+                    for section in ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies"):
+                        declared = document.get(section, {})
+                        if isinstance(declared, dict):
+                            for name, constraint in declared.items():
+                                if isinstance(name, str) and isinstance(constraint, str):
+                                    dependencies.append({
+                                        "name": name,
+                                        "constraint": constraint,
+                                        "ecosystem": "npm",
+                                        "group": section,
+                                    })
+                elif filename == "Cargo.toml":
+                    document = tomllib.loads(text_content)
+                    for section in ("dependencies", "dev-dependencies", "build-dependencies"):
+                        declared = document.get(section, {})
+                        if isinstance(declared, dict):
+                            for name, constraint in declared.items():
+                                if isinstance(name, str):
+                                    version = constraint if isinstance(constraint, str) else constraint.get("version", "")
+                                    dependencies.append({
+                                        "name": name,
+                                        "constraint": version if isinstance(version, str) else "",
+                                        "ecosystem": "crates.io",
+                                        "group": section,
+                                    })
+                elif filename == "go.mod":
+                    in_require_block = False
+                    for line in text_content.splitlines():
+                        candidate = line.strip()
+                        if candidate.startswith("require ("):
+                            in_require_block = True
+                            continue
+                        if in_require_block and candidate == ")":
+                            in_require_block = False
+                            continue
+                        if candidate.startswith("require ") or in_require_block:
+                            candidate = candidate.removeprefix("require ").strip()
+                            parts = candidate.split()
+                            if len(parts) >= 2 and not parts[0].startswith("//"):
+                                dependencies.append({
+                                    "name": parts[0],
+                                    "constraint": parts[1],
+                                    "ecosystem": "go",
+                                })
+            except (tomllib.TOMLDecodeError, json.JSONDecodeError, TypeError, AttributeError):
+                continue
+
+            for dependency in dependencies:
+                facts.append(GenomeFact.observed(
+                    repository=repository.full_name,
+                    commit_sha=commit_sha,
+                    fact_type="dependency.declared",
+                    value=dependency,
+                    source_path=path,
+                    source_url=(
+                        f"{repository.canonical_url}/blob/{commit_sha}/{quote(path, safe='/')}"
+                    ),
+                ))
 
         blob_paths = {entry.path for entry in entries if entry.kind == "blob"}
         for manifest, ecosystem in MANIFESTS.items():
