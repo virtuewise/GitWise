@@ -4,13 +4,13 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-
 from gitwise_api.genome import SoftwareGenomeSnapshot
 from gitwise_api.storage import (
     GenomeSnapshotStore,
     SnapshotAccessDenied,
     SnapshotContentConflict,
 )
+
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
