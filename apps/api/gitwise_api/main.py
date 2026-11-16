@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 
 from gitwise_api.config import get_settings
+from gitwise_api.evolution import GenomeComparison, compare_genomes
 from gitwise_api.genome import SoftwareGenomeSnapshot
 from gitwise_api.ingestion import GitHubRepositoryClient
 from gitwise_api.repositories import (
+    RepositoryCompareRequest,
     RepositoryInspectRequest,
     RepositoryReference,
     parse_github_repository_url,
@@ -55,6 +57,25 @@ async def inspect_repository(request: RepositoryInspectRequest) -> SoftwareGenom
     repository = parse_github_repository_url(request.url)
     github = GitHubRepositoryClient()
     try:
-        return await github.inspect(repository)
+        return await github.inspect(repository, request.ref)
+    finally:
+        await github.close()
+
+
+@app.post(
+    "/repositories/compare",
+    response_model=GenomeComparison,
+    tags=["repositories"],
+)
+async def compare_repository_refs(request: RepositoryCompareRequest) -> GenomeComparison:
+    """Compare two explicit refs using fresh, commit-pinned Genome observations."""
+    repository = parse_github_repository_url(request.url)
+    github = GitHubRepositoryClient()
+    try:
+        base, head = await __import__("asyncio").gather(
+            github.inspect(repository, request.base_ref),
+            github.inspect(repository, request.head_ref),
+        )
+        return compare_genomes(base, head)
     finally:
         await github.close()
