@@ -57,8 +57,8 @@ Define retention per repository owner before production storage. Deletion must r
 
 1. **Completed:** expose GitHub's immutable numeric repository ID in new Software Genome snapshots.
 2. **Completed:** add backend-neutral canonical snapshot keys and content digests, with timestamp/order invariance tests; preserve semantically ordered arrays inside fact values.
-3. Add PostgreSQL migrations and a transactional store with insert-if-absent/conflict semantics.
-4. Add owner/installation access grants and enforce authorization before any snapshot operation.
+3. **Initial implementation:** add PostgreSQL migrations for provider repositories, revocable principal grants, and immutable snapshots; add a transactional insert-if-absent store that requires an active write grant and rejects digest conflicts. The store is not yet wired to an authenticated API or deployed database.
+4. Add verified GitHub identity/installation grant provisioning, revocation workflows, and authorization tests before exposing snapshot operations.
 5. Add retention, deletion, audit, and installation-revocation workflows.
 6. Add historical retrieval and comparisons over stored snapshots; then add incremental refresh.
 
