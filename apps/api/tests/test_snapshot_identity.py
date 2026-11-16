@@ -77,3 +77,31 @@ def test_content_digest_preserves_order_inside_fact_values() -> None:
     second.facts[0].value = ["package", "test", "compile"]
 
     assert snapshot_content_digest(first) != snapshot_content_digest(second)
+
+
+def test_fact_identity_is_independent_of_mapping_insertion_order() -> None:
+    common = {
+        "repository": "acme/widget",
+        "commit_sha": "ABCDEF1234567",
+        "fact_type": "configuration.settings",
+    }
+    first = GenomeFact.observed(**common, value={"alpha": 1, "beta": 2})
+    second = GenomeFact.observed(**common, value={"beta": 2, "alpha": 1})
+
+    assert first.fact_id == second.fact_id
+    assert snapshot_content_digest(make_snapshot_with_fact(first)) == snapshot_content_digest(
+        make_snapshot_with_fact(second)
+    )
+
+
+def make_snapshot_with_fact(fact: GenomeFact) -> SoftwareGenomeSnapshot:
+    return SoftwareGenomeSnapshot(
+        repository="acme/widget",
+        repository_url="https://github.com/acme/widget",
+        provider_repository_id=42,
+        default_branch="main",
+        commit_sha="ABCDEF1234567",
+        tree_sha="tree1234567",
+        is_private=False,
+        facts=[fact],
+    )
