@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
 
-from gitwise_api.evolution import compare_genomes
 import pytest
+
+from gitwise_api.evolution import compare_genomes
 from gitwise_api.genome import (
     ArchitectureEdge,
     ArchitectureNode,
