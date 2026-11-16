@@ -80,8 +80,10 @@ def test_compares_dependency_add_remove_and_constraint_changes_with_evidence() -
     ]
 
     result = compare_genomes(base, head)
-    changes = {(item.change, item.before and item.before.get("name") or item.after["name"]): item
-               for item in result.changes}
+    changes = {
+        (item.change, item.before and item.before.get("name") or item.after["name"]): item
+        for item in result.changes
+    }
 
     assert result.repository == "acme/widget"
     assert result.base_commit_sha == base.commit_sha
