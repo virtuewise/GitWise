@@ -175,6 +175,26 @@ def test_created_installation_provisions_only_verified_repositories() -> None:
         {"id": 456, "app_id": 999},
     ],
 )
+
+def test_unsuspend_reconciles_current_installation_repositories() -> None:
+    async def exercise() -> None:
+        app = FakeGitHubApp()
+        grants = FakeGrantStore()
+        result = await process_installation_event(
+            event_name="installation",
+            payload={
+                "action": "unsuspend",
+                "installation": {"id": 456, "app_id": 123},
+            },
+            app_id=123,
+            app=app,
+            grants=grants,
+        )
+        assert result == "reconciled:2;revoked:1"
+        assert grants.reconciliations == [(9001, 9003)]
+
+    asyncio.run(exercise())
+
 def test_rejects_untrusted_installation_identity(installation) -> None:
     async def exercise() -> None:
         with pytest.raises(GitHubInstallationEventError):
