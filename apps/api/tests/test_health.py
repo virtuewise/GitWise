@@ -1,5 +1,4 @@
 from fastapi.testclient import TestClient
-
 from gitwise_api.main import app
 
 client = TestClient(app)
