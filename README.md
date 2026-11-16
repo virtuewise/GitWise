@@ -20,7 +20,7 @@ See [the detailed roadmap](docs/roadmap.md) for scope, acceptance goals, and del
 
 ## Current project status
 
-GitWise is at the foundation stage, building Phase 1. `POST /repositories/inspect` resolves a public GitHub repository and returns a bounded, commit-pinned Software Genome snapshot. Supply an optional `ref` to inspect a branch, tag, or commit. `POST /repositories/compare` accepts `base_ref` and `head_ref` and compares the two freshly ingested snapshots across supported Python architecture relationships and declared dependencies. The service statically parses selected files; it does not execute repository code. Snapshots are not yet exposed through the API. The repository now includes an initial PostgreSQL migration and a grant-checked transactional store for immutable snapshots; authenticated grant provisioning and production database deployment remain unfinished.
+GitWise is at the foundation stage, building Phase 1. `POST /repositories/inspect` resolves a public GitHub repository and returns a bounded, commit-pinned Software Genome snapshot. Supply an optional `ref` to inspect a branch, tag, or commit. `POST /repositories/compare` accepts `base_ref` and `head_ref` and compares the two freshly ingested snapshots across supported Python architecture relationships and declared dependencies. The service statically parses selected files; it does not execute repository code. Snapshots are not yet exposed through the API. The repository includes PostgreSQL-backed immutable snapshot storage foundations, a grant-checked write path, GitHub webhook signature verification, durable delivery replay protection, and a narrowly scoped authenticated `ping` webhook endpoint. Verified GitHub App installation ownership, grant provisioning/revocation, tenant-isolated history APIs, and production database deployment remain unfinished.
 
 ## Product principles
 
@@ -63,6 +63,10 @@ The API will be available at http://127.0.0.1:8000 and its OpenAPI docs at http:
 ## Configuration
 
 Copy `.env.example` to `.env` and configure values as needed. Never commit tokens, private keys, or repository credentials.
+
+## GitHub webhook endpoint
+
+Configure `GITWISE_GITHUB_WEBHOOK_SECRET` with the webhook secret from the GitHub App and configure `GITWISE_DATABASE_URL` with PostgreSQL. `POST /webhooks/github` verifies `X-Hub-Signature-256` against the original raw body, enforces a 1 MB request limit, and durably deduplicates GitHub `ping` deliveries. Repeated delivery IDs with identical content are acknowledged as duplicates; conflicting reuse is rejected. Other event types deliberately return `501` until verified installation-ownership and grant-lifecycle handlers are implemented. Do not enable installation or repository permission events yet.
 
 ## PostgreSQL snapshot storage
 
