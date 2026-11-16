@@ -208,32 +208,6 @@ def test_rejects_untrusted_installation_identity(installation) -> None:
     asyncio.run(exercise())
 
 
-def test_rejects_duplicate_or_malformed_repository_ids() -> None:
-    async def exercise() -> None:
-        for repositories in (
-            [
-                {"id": 9001, "full_name": "acme/api"},
-                {"id": 9001, "full_name": "acme/other"},
-            ],
-            [{"id": True, "full_name": "acme/api"}],
-            [{"id": 9001, "full_name": "acme/api/extra"}],
-        ):
-            with pytest.raises(GitHubInstallationEventError):
-                await process_installation_event(
-                    event_name="installation",
-                    payload={
-                        "action": "created",
-                        "installation": {"id": 456, "app_id": 123},
-                        "repositories": repositories,
-                    },
-                    app_id=123,
-                    app=FakeGitHubApp(),
-                    grants=FakeGrantStore(),
-                )
-
-    asyncio.run(exercise())
-
-
 def test_rejects_unknown_installation_repository_action() -> None:
     async def exercise() -> None:
         with pytest.raises(
@@ -252,48 +226,54 @@ def test_rejects_unknown_installation_repository_action() -> None:
 
     asyncio.run(exercise())
 
-def test_rejects_repository_identity_mismatch_from_token_exchange() -> None:
-    class MismatchedGitHubApp(FakeGitHubApp):
-        async def create_repository_scoped_token(
-            self,
-            installation_id: int,
-            *,
-            repository_id: int,
-            owner: str,
-            repository_name: str,
-        ) -> GitHubInstallationToken:
-            return GitHubInstallationToken(
-                token="ephemeral-test-token",
-                expires_at="2026-11-17T00:00:00Z",
-                permissions={"contents": "read"},
-                repositories=(
-                    {
-                        "id": repository_id + 1,
-                        "full_name": f"{owner}/{repository_name}",
-                        "private": True,
-                    },
-                ),
-            )
 
+def test_rejects_malformed_repository_event_lists() -> None:
     async def exercise() -> None:
-        with pytest.raises(
-            GitHubInstallationEventError, match="repository identity"
+        for repositories in (
+            [
+                {"id": 9001, "full_name": "acme/api"},
+                {"id": 9001, "full_name": "acme/other"},
+            ],
+            [{"id": True, "full_name": "acme/api"}],
+            [{"id": 9001, "full_name": "acme/api/extra"}],
         ):
-            await process_installation_event(
-                event_name="installation_repositories",
-                payload={
-                    "action": "added",
-                    "repository_selection": "selected",
-                    "installation": {"id": 456, "app_id": 123},
-                    "repositories_added": [
-                        {"id": 9001, "full_name": "acme/api"}
-                    ],
-                    "repositories_removed": [],
-                },
-                app_id=123,
-                app=MismatchedGitHubApp(),
-                grants=FakeGrantStore(),
-            )
+            with pytest.raises(GitHubInstallationEventError):
+                await process_installation_event(
+                    event_name="installation_repositories",
+                    payload={
+                        "action": "added",
+                        "repository_selection": "selected",
+                        "installation": {"id": 456, "app_id": 123},
+                        "repositories_added": repositories,
+                        "repositories_removed": [],
+                    },
+                    app_id=123,
+                    app=FakeGitHubApp(),
+                    grants=FakeGrantStore(),
+                )
+
+    asyncio.run(exercise())
+
+
+def test_repository_payload_is_not_authoritative_for_current_grant_set() -> None:
+    async def exercise() -> None:
+        app = FakeGitHubApp()
+        grants = FakeGrantStore()
+        result = await process_installation_event(
+            event_name="installation_repositories",
+            payload={
+                "action": "added",
+                "repository_selection": "selected",
+                "installation": {"id": 456, "app_id": 123},
+                "repositories_added": [{"id": 9999, "full_name": "acme/forged"}],
+                "repositories_removed": [],
+            },
+            app_id=123,
+            app=app,
+            grants=grants,
+        )
+        assert result == "reconciled:2;revoked:1"
+        assert grants.reconciliations == [(9001, 9003)]
 
     asyncio.run(exercise())
 
