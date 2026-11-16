@@ -6,9 +6,21 @@ GitWise connects to GitHub repositories and builds a continuously evolving under
 
 Its long-term foundation is the **Software Genome**: a structured, evidence-backed record of what makes a software project what it is.
 
-## Project status
+## Product vision
 
-GitWise is at the foundation stage. The first milestone is a read-only repository intelligence service that can safely inspect a repository, produce a structured project snapshot, and explain its findings with links back to source files.
+GitWise is designed to grow through five phases:
+
+1. **Repository intelligence** — repository understanding, architecture maps, project memory, and pull request intelligence. Target: a usable MVP.
+2. **Development intelligence** — intelligent testing, impact prediction, security insights, and development recommendations. Target: everyday development.
+3. **Autonomous collaboration** — coordinated AI agents that investigate issues, propose changes, run tests, and submit pull requests under human supervision. Target: trusted AI-assisted engineering.
+4. **Organization intelligence** — connected understanding across repositories, teams, services, and systems. Target: enterprise infrastructure.
+5. **Global software intelligence** — an interoperable ecosystem for software knowledge, project histories, architecture intelligence, and trusted agent collaboration. Target: an industry-wide platform.
+
+See [the detailed roadmap](docs/roadmap.md) for scope, acceptance goals, and delivery principles.
+
+## Current project status
+
+GitWise is at the foundation stage, beginning with Phase 1. The first vertical slice is a read-only repository intelligence service that can safely inspect a repository, produce a structured project snapshot, and explain findings with links back to source files.
 
 ## Product principles
 
@@ -16,15 +28,17 @@ GitWise is at the foundation stage. The first milestone is a read-only repositor
 - **Read-only by default:** repository access starts with the minimum permissions required.
 - **Human control:** AI suggestions do not modify code or repository settings without explicit authorization.
 - **Incremental understanding:** update project knowledge when repository contents change instead of rebuilding everything unnecessarily.
-- **Portable project memory:** keep the Software Genome structured and exportable.
+- **Portable project memory:** keep the Software Genome structured, versioned, and exportable.
+- **Privacy and ownership:** repository owners control access to their code and whether knowledge may be shared.
 
-## Planned capabilities
+## Initial capabilities
 
-1. **Repository Intelligence** — understand repository structure, languages, frameworks, and key project files.
-2. **Architecture Vision** — map modules and dependencies with evidence.
-3. **Project Memory** — preserve decisions, conventions, and important historical context.
-4. **Guardian** — surface actionable security, reliability, and maintenance risks.
-5. **GitWise Agents** — coordinate bounded development tasks under human supervision.
+- **Repository Intelligence** — understand repository structure, languages, frameworks, and key project files.
+- **Architecture Vision** — map modules and dependencies with evidence.
+- **Project Memory** — preserve decisions, conventions, and important historical context.
+- **Pull Request Intelligence** — explain proposed changes and likely impact.
+- **Guardian** — planned security, reliability, and maintenance insights.
+- **GitWise Agents** — planned bounded development tasks under human supervision.
 
 ## Initial architecture
 
