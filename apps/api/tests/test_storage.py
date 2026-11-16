@@ -4,9 +4,6 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
-
 from gitwise_api.genome import GenomeFact, SoftwareGenomeSnapshot
 from gitwise_api.storage import (
     GenomeSnapshotStore,
@@ -25,6 +22,9 @@ def test_snapshot_store_requires_async_postgresql_url() -> None:
 @pytest.mark.skipif(not DATABASE_URL, reason="PostgreSQL integration database is not configured")
 def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability() -> None:
     async def exercise() -> None:
+        from sqlalchemy import text
+        from sqlalchemy.exc import DBAPIError
+
         repository_id = uuid4().int % (2**62) + 1
         principal_id = f"test-user-{uuid4()}"
         repository = f"gitwise-integration/repo-{repository_id}"
