@@ -303,3 +303,32 @@ def test_repository_identity_rejects_boolean_numeric_ids() -> None:
                 await app.verify_installation(True)
 
     asyncio.run(exercise())
+
+def test_rejects_suspended_installation() -> None:
+    async def exercise() -> None:
+        private_pem, _ = make_app_key()
+        async with httpx.AsyncClient(
+            base_url="https://api.github.com",
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    json={
+                        "id": 456,
+                        "app_id": 123,
+                        "account": {"id": 789, "login": "acme"},
+                        "target_type": "Organization",
+                        "repository_selection": "selected",
+                        "suspended_at": "2026-11-16T12:00:00Z",
+                    },
+                )
+            ),
+        ) as http_client:
+            app = GitHubAppClient(
+                app_id=123,
+                private_key=private_pem,
+                client=http_client,
+            )
+            with pytest.raises(GitHubAppAuthenticationError, match="suspended"):
+                await app.verify_installation(456)
+
+    asyncio.run(exercise())
