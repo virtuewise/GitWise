@@ -104,3 +104,38 @@ def test_installation_grants_are_idempotent_and_isolated() -> None:
             await store.close()
 
     asyncio.run(exercise())
+
+@pytest.mark.skipif(not DATABASE_URL, reason="PostgreSQL integration database is not configured")
+def test_installation_advisory_lock_serializes_workers() -> None:
+    async def exercise() -> None:
+        installation_id = uuid4().int % 1_000_000_000 + 1
+        store = InstallationGrantStore.from_url(DATABASE_URL)
+        first_acquired = asyncio.Event()
+        release_first = asyncio.Event()
+        second_acquired = asyncio.Event()
+
+        async def first_worker() -> None:
+            async with store.installation_lock(installation_id):
+                first_acquired.set()
+                await release_first.wait()
+
+        async def second_worker() -> None:
+            await first_acquired.wait()
+            async with store.installation_lock(installation_id):
+                second_acquired.set()
+
+        first_task = asyncio.create_task(first_worker())
+        second_task = asyncio.create_task(second_worker())
+        try:
+            await asyncio.wait_for(first_acquired.wait(), timeout=2)
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(second_acquired.wait(), timeout=0.05)
+            release_first.set()
+            await asyncio.wait_for(second_acquired.wait(), timeout=2)
+            await asyncio.gather(first_task, second_task)
+        finally:
+            release_first.set()
+            await asyncio.gather(first_task, second_task, return_exceptions=True)
+            await store.close()
+
+    asyncio.run(exercise())
