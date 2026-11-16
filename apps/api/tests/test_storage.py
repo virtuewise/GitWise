@@ -1,5 +1,4 @@
 import pytest
-
 from gitwise_api.storage import GenomeSnapshotStore
 
 
