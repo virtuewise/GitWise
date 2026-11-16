@@ -3,7 +3,6 @@ from __future__ import annotations
 import httpx
 import pytest
 from fastapi import HTTPException
-
 from gitwise_api.ingestion import GitHubRepositoryClient
 from gitwise_api.repositories import parse_github_repository_url
 
