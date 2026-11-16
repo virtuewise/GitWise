@@ -163,3 +163,69 @@ def test_requires_valid_app_configuration() -> None:
         GitHubAppClient(app_id=0, private_key="key")
     with pytest.raises(ValueError, match="private key"):
         GitHubAppClient(app_id=123, private_key="  ")
+
+def test_repository_scoped_token_verifies_immutable_repository_id() -> None:
+    async def exercise() -> None:
+        private_pem, _ = make_app_key()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET":
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": 456,
+                        "app_id": 123,
+                        "account": {"id": 789, "login": "acme"},
+                        "target_type": "Organization",
+                        "repository_selection": "selected",
+                    },
+                )
+            return httpx.Response(
+                201,
+                json={
+                    "token": "repository-scoped-token",
+                    "expires_at": "2026-11-17T00:00:00Z",
+                    "permissions": {"contents": "read", "metadata": "read"},
+                    "repositories": [
+                        {"id": 999, "full_name": "acme/service-api"}
+                    ],
+                },
+            )
+
+        async with httpx.AsyncClient(
+            base_url="https://api.github.com",
+            transport=httpx.MockTransport(handler),
+        ) as http_client:
+            app = GitHubAppClient(
+                app_id=123,
+                private_key=private_pem,
+                client=http_client,
+            )
+            token = await app.create_repository_scoped_token(
+                456,
+                repository_id=999,
+                owner="acme",
+                repository_name="service-api",
+            )
+            assert token.repositories[0]["id"] == 999
+
+            with pytest.raises(GitHubAppAuthenticationError, match="repository identity"):
+                await app.create_repository_scoped_token(
+                    456,
+                    repository_id=1000,
+                    owner="acme",
+                    repository_name="service-api",
+                )
+
+            with pytest.raises(
+                GitHubAppAuthenticationError, match="installation account"
+            ):
+                await app.create_repository_scoped_token(
+                    456,
+                    repository_id=999,
+                    owner="other-org",
+                    repository_name="service-api",
+                )
+
+    asyncio.run(exercise())
+
