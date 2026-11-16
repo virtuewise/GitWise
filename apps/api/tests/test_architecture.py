@@ -1,4 +1,8 @@
-from gitwise_api.architecture import extract_python_imports, module_name_for_path
+from gitwise_api.architecture import (
+    extract_python_imports,
+    module_name_for_path,
+    parse_python_imports,
+)
 
 
 def test_module_name_for_package_and_source_layouts() -> None:
@@ -25,3 +29,9 @@ from gitwise_api import config
 
 def test_invalid_python_source_is_ignored() -> None:
     assert extract_python_imports("def broken(:\n", "package.module", "module.py") == []
+
+
+
+def test_parse_python_imports_distinguishes_invalid_source_from_no_imports() -> None:
+    assert parse_python_imports("def broken(:\n", "package.module", "module.py") is None
+    assert parse_python_imports("value = 1\n", "package.module", "module.py") == []
