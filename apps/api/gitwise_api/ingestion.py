@@ -22,6 +22,8 @@ from gitwise_api.repositories import RepositoryReference
 
 GITHUB_API = "https://api.github.com"
 MAX_TREE_ENTRIES = 2_000
+MAX_GITHUB_RESPONSE_BYTES = 8_000_000
+MAX_BLOB_RESPONSE_BYTES = 2_000_000
 MAX_FILE_SIZE_BYTES = 1_000_000
 MAX_MANIFESTS_TO_READ = 40
 MAX_TOTAL_MANIFEST_BYTES = 5_000_000
@@ -67,9 +69,52 @@ class GitHubRepositoryClient:
         if self._owns_client:
             await self._client.aclose()
 
-    async def _get(self, path: str) -> dict:
+    async def _get(
+        self,
+        path: str,
+        max_response_bytes: int = MAX_GITHUB_RESPONSE_BYTES,
+    ) -> dict:
         try:
-            response = await self._client.get(path)
+            async with self._client.stream("GET", path) as response:
+                if response.status_code == 404:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="GitHub repository or ref not found.",
+                    )
+                if response.status_code in {403, 429}:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail=(
+                            "GitHub API rate limit or access policy prevented this inspection."
+                        ),
+                        headers={"Retry-After": response.headers.get("Retry-After", "60")},
+                    )
+                if response.is_error:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail="GitHub returned an error while inspecting this repository.",
+                    )
+
+                content_length = response.headers.get("Content-Length")
+                if content_length is not None:
+                    try:
+                        declared_length = int(content_length)
+                    except ValueError:
+                        declared_length = None
+                    if declared_length is not None and declared_length > max_response_bytes:
+                        raise HTTPException(
+                            status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail="GitHub response exceeded the safe ingestion size limit.",
+                        )
+
+                body = bytearray()
+                async for chunk in response.aiter_bytes():
+                    if len(body) + len(chunk) > max_response_bytes:
+                        raise HTTPException(
+                            status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail="GitHub response exceeded the safe ingestion size limit.",
+                        )
+                    body.extend(chunk)
         except httpx.TimeoutException as exc:
             raise HTTPException(
                 status_code=status.HTTP_504_GATEWAY_TIMEOUT,
@@ -81,22 +126,9 @@ class GitHubRepositoryClient:
                 detail="Unable to communicate with GitHub.",
             ) from exc
 
-        if response.status_code == 404:
-            raise HTTPException(status_code=404, detail="GitHub repository or ref not found.")
-        if response.status_code in {403, 429}:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="GitHub API rate limit or access policy prevented this inspection.",
-                headers={"Retry-After": response.headers.get("Retry-After", "60")},
-            )
-        if response.is_error:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="GitHub returned an error while inspecting this repository.",
-            )
         try:
-            payload = response.json()
-        except ValueError as exc:
+            payload = json.loads(body)
+        except (ValueError, UnicodeDecodeError) as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail="GitHub returned an invalid response.",
@@ -238,7 +270,10 @@ class GitHubRepositoryClient:
                 continue
             if total_manifest_bytes + entry.size > MAX_TOTAL_MANIFEST_BYTES:
                 break
-            blob_payload = await self._get(f"{base}/git/blobs/{quote(entry.sha, safe='')}")
+            blob_payload = await self._get(
+                f"{base}/git/blobs/{quote(entry.sha, safe='')}",
+                max_response_bytes=MAX_BLOB_RESPONSE_BYTES,
+            )
             encoded = blob_payload.get("content")
             encoding = blob_payload.get("encoding")
             if not isinstance(encoded, str) or encoding != "base64":
@@ -418,7 +453,8 @@ class GitHubRepositoryClient:
                 architecture_limitations.add("max_total_python_bytes")
                 break
             blob_payload = await self._get(
-                f"{base}/git/blobs/{quote(entry.sha, safe='')}"
+                f"{base}/git/blobs/{quote(entry.sha, safe='')}",
+                max_response_bytes=MAX_BLOB_RESPONSE_BYTES,
             )
             encoded = blob_payload.get("content")
             if not isinstance(encoded, str) or blob_payload.get("encoding") != "base64":
