@@ -132,9 +132,21 @@ async def process_installation_event(
 
     if action not in ("added", "removed"):
         raise GitHubInstallationEventError("Unsupported installation repository action.")
+    repository_selection = payload.get("repository_selection")
+    if repository_selection not in ("all", "selected"):
+        raise GitHubInstallationEventError("Repository selection must be all or selected.")
+    if "repositories_added" not in payload or "repositories_removed" not in payload:
+        raise GitHubInstallationEventError("Installation repository lists are required.")
     installation = await app.verify_installation(installation_id)
-    added = _repository_candidates(payload.get("repositories_added", []))
-    removed = _repository_candidates(payload.get("repositories_removed", []))
+    added = _repository_candidates(payload["repositories_added"])
+    removed = _repository_candidates(payload["repositories_removed"])
+
+    # GitHub sends an empty repositories_removed array when selection changes
+    # from all repositories to selected repositories. Revoke all old grants
+    # rather than accidentally retaining access to repositories no longer selected.
+    if action == "removed" and repository_selection == "selected" and not removed:
+        return f"revoked:{await grants.revoke_installation(installation_id)}"
+
     added_verified = await _verify_repositories(app, installation, added)
     granted, revoked = await grants.apply_repository_changes(
         installation,
