@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import asynccontextmanager
 from typing import Any
 
-from gitwise_api.github_app import (
-    GitHubAppClient,
-    GitHubAppInstallation,
-)
+from gitwise_api.github_app import GitHubAppClient
 from gitwise_api.installation_grants import InstallationGrantStore
 
 MAX_REPOSITORIES_PER_EVENT = 500
@@ -36,9 +34,7 @@ def _installation_id(payload: Mapping[str, Any], app_id: int) -> int:
     return installation_id
 
 
-def _repository_candidates(
-    values: Any,
-) -> list[dict[str, Any]]:
+def _repository_candidates(values: Any) -> list[dict[str, Any]]:
     if not isinstance(values, list) or len(values) > MAX_REPOSITORIES_PER_EVENT:
         raise GitHubInstallationEventError("Installation repository list is invalid or too large.")
     candidates: list[dict[str, Any]] = []
@@ -61,41 +57,6 @@ def _repository_candidates(
     return candidates
 
 
-async def _verify_repositories(
-    app: GitHubAppClient,
-    installation: GitHubAppInstallation,
-    candidates: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    verified: list[dict[str, Any]] = []
-    for candidate in candidates:
-        full_name = candidate["full_name"]
-        owner, repository_name = full_name.split("/", 1)
-        repository_id = candidate["id"]
-        if owner.casefold() != installation.account_login.casefold():
-            raise GitHubInstallationEventError(
-                "Repository owner does not match the verified installation account."
-            )
-        token = await app.create_repository_scoped_token(
-            installation.installation_id,
-            repository_id=repository_id,
-            owner=owner,
-            repository_name=repository_name,
-        )
-        if (
-            len(token.repositories) != 1
-            or token.repositories[0].get("id") != repository_id
-            or not isinstance(token.repositories[0].get("full_name"), str)
-            or token.repositories[0]["full_name"].casefold()
-            != f"{owner}/{repository_name}".casefold()
-            or token.permissions.get("contents") != "read"
-        ):
-            raise GitHubInstallationEventError(
-                "GitHub did not confirm the requested repository identity and read scope."
-            )
-        verified.extend(token.repositories)
-    return verified
-
-
 async def process_installation_event(
     *,
     event_name: str,
@@ -104,29 +65,65 @@ async def process_installation_event(
     app: GitHubAppClient,
     grants: InstallationGrantStore,
 ) -> str:
-    """Apply an authenticated lifecycle event using GitHub-verified identities.
+    """Apply signed lifecycle events against GitHub's current installation state.
 
     The HTTP layer must verify the raw-body webhook signature before calling
-    this function. Grant operations are idempotent so a delivery can safely be
-    replayed if the process fails before its delivery record is completed.
+    this function. A PostgreSQL advisory lock serializes deliveries per
+    installation. Current GitHub membership, not event ordering, determines
+    the resulting grant set.
     """
     if event_name not in ("installation", "installation_repositories"):
         raise GitHubInstallationEventError("Unsupported GitHub installation event.")
     installation_id = _installation_id(payload, app_id)
+    async with grants.installation_lock(installation_id):
+        return await _process_installation_event_locked(
+            event_name=event_name,
+            payload=payload,
+            app_id=app_id,
+            installation_id=installation_id,
+            app=app,
+            grants=grants,
+        )
+
+
+async def _process_installation_event_locked(
+    *,
+    event_name: str,
+    payload: dict[str, Any],
+    app_id: int,
+    installation_id: int,
+    app: GitHubAppClient,
+    grants: InstallationGrantStore,
+) -> str:
     action = payload.get("action")
     if not isinstance(action, str):
         raise GitHubInstallationEventError("Installation event action is required.")
 
     if event_name == "installation":
-        if action in ("deleted", "suspend"):
+        if action == "deleted":
             return f"revoked:{await grants.revoke_installation(installation_id)}"
+        if action == "suspend":
+            installation = await app.verify_installation(
+                installation_id, allow_suspended=True
+            )
+            if installation.suspended_at is not None:
+                return f"revoked:{await grants.revoke_installation(installation_id)}"
+            # A delayed suspend event must not revoke a currently active installation.
+            installation, repositories = await app.list_installation_repositories(
+                installation_id
+            )
+            granted, revoked = await grants.reconcile_installation_repositories(
+                installation, repositories
+            )
+            return f"reconciled:{granted};revoked:{revoked}"
         if action not in ("created", "unsuspend"):
             raise GitHubInstallationEventError("Unsupported installation action.")
-        installation, current_repositories = await app.list_installation_repositories(
+
+        installation, repositories = await app.list_installation_repositories(
             installation_id
         )
         granted, revoked = await grants.reconcile_installation_repositories(
-            installation, current_repositories
+            installation, repositories
         )
         return f"reconciled:{granted};revoked:{revoked}"
 
@@ -137,32 +134,13 @@ async def process_installation_event(
         raise GitHubInstallationEventError("Repository selection must be all or selected.")
     if "repositories_added" not in payload or "repositories_removed" not in payload:
         raise GitHubInstallationEventError("Installation repository lists are required.")
-    added = _repository_candidates(payload["repositories_added"])
-    removed = _repository_candidates(payload["repositories_removed"])
+    _repository_candidates(payload["repositories_added"])
+    _repository_candidates(payload["repositories_removed"])
 
-    # GitHub sends an empty repositories_removed array when selection changes
-    # from all repositories to selected repositories. Reconcile against the
-    # installation's current authenticated repository list to preserve access
-    # only for repositories that remain selected.
-    if (
-        action == "removed"
-        and repository_selection == "selected"
-        and not removed
-        and not added
-    ):
-        installation, current_repositories = await app.list_installation_repositories(
-            installation_id
-        )
-        granted, revoked = await grants.reconcile_installation_repositories(
-            installation, current_repositories
-        )
-        return f"reconciled:{granted};revoked:{revoked}"
-
-    installation = await app.verify_installation(installation_id)
-    added_verified = await _verify_repositories(app, installation, added)
-    granted, revoked = await grants.apply_repository_changes(
-        installation,
-        added_verified,
-        [repository["id"] for repository in removed],
+    installation, repositories = await app.list_installation_repositories(
+        installation_id
     )
-    return f"granted:{granted};revoked:{revoked}"
+    granted, revoked = await grants.reconcile_installation_repositories(
+        installation, repositories
+    )
+    return f"reconciled:{granted};revoked:{revoked}"
