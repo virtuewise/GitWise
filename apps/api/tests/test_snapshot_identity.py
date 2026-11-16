@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 import pytest
+from pydantic import ValidationError
 from gitwise_api.genome import GenomeFact, SoftwareGenomeSnapshot
 from gitwise_api.snapshot_identity import snapshot_content_digest, snapshot_storage_key
 
@@ -118,8 +119,6 @@ def test_fact_values_reject_non_finite_numbers() -> None:
 
 
 def test_fact_values_reject_non_json_python_objects() -> None:
-    from pydantic import ValidationError
-
     with pytest.raises(ValidationError):
         GenomeFact(
             fact_id="fact",
