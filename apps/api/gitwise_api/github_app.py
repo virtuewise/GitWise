@@ -220,8 +220,10 @@ class GitHubAppClient:
         if type(repository_id) is not int or repository_id < 1:
             raise ValueError("GitHub repository ID must be a positive integer.")
         if (
-            not owner
+            not isinstance(owner, str)
+            or not owner
             or "/" in owner
+            or not isinstance(repository_name, str)
             or not repository_name
             or "/" in repository_name
             or len(repository_name) > 100
