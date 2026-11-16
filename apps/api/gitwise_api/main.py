@@ -161,13 +161,10 @@ async def receive_github_webhook(request: Request) -> dict[str, str]:
             detail="GitHub App lifecycle processing is not configured.",
         )
 
-    github_app = (
-        GitHubAppClient(app_id=app_id, private_key=private_key)
-        if event_name != "ping"
-        else None
-    )
+    github_app = None
     try:
         if event_name != "ping":
+            github_app = GitHubAppClient(app_id=app_id, private_key=private_key)
             await process_installation_event(
                 event_name=event_name,
                 payload=decoded,
