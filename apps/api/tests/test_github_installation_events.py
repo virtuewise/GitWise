@@ -86,7 +86,7 @@ def test_added_and_removed_repositories_use_verified_ids_and_atomic_grants() -> 
         result = await process_installation_event(
             event_name="installation_repositories",
             payload={
-                "action": " added ",
+                "action": "added",
                 "installation": {"id": 456, "app_id": 123},
                 "repositories_added": [
                     {
