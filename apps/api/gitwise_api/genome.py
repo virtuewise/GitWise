@@ -98,6 +98,7 @@ class SoftwareGenomeSnapshot(BaseModel):
     schema_version: Literal["1.0"] = "1.0"
     repository: str
     repository_url: str
+    provider_repository_id: int | None = Field(default=None, ge=1)
     description: str | None = None
     default_branch: str
     requested_ref: str | None = None
