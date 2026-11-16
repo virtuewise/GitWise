@@ -13,6 +13,7 @@ class FakeDeliveryStore:
     def __init__(self) -> None:
         self.deliveries: set[str] = set()
         self.processed: set[str] = set()
+        self.claim_tokens: dict[str, object] = {}
 
     async def claim(self, *, delivery_id, event_name, payload):
         key = str(delivery_id)
@@ -20,12 +21,16 @@ class FakeDeliveryStore:
             "in_progress" if key in self.deliveries else "claimed"
         )
         self.deliveries.add(key)
-        return SimpleNamespace(delivery_id=delivery_id, outcome=outcome)
+        token = uuid4()
+        self.claim_tokens[key] = token
+        return SimpleNamespace(
+            delivery_id=delivery_id, outcome=outcome, claim_token=token
+        )
 
-    async def mark_processed(self, delivery_id):
+    async def mark_processed(self, delivery_id, *, claim_token):
         self.processed.add(str(delivery_id))
 
-    async def mark_failed(self, delivery_id, *, error_code):
+    async def mark_failed(self, delivery_id, *, claim_token, error_code):
         self.deliveries.discard(str(delivery_id))
 
 
