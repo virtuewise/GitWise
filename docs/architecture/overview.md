@@ -82,9 +82,9 @@ The public comparison endpoint currently performs fresh ingestion for each reque
 
 ## Near-term engineering sequence
 
-1. Harden upstream response-size and parser-failure handling.
-2. Make architecture completeness account for invalid or unparseable source files.
-3. Introduce durable, access-controlled, commit-addressed snapshot storage.
+1. **Completed:** enforce upstream response-size limits, including streamed bodies without trustworthy `Content-Length` headers.
+2. **Completed:** treat invalid or unparseable Python source as an explicit architecture-analysis limitation rather than silently reporting a complete graph.
+3. Introduce durable, access-controlled, commit-addressed snapshot storage with schema-versioned records and idempotent writes.
 4. Add incremental refresh and efficient comparison over stored observations.
 5. Expand conservative architecture analysis beyond Python, with explicit per-language completeness.
 6. Build evidence navigation and project overview workflows on top of the stable Genome API.
