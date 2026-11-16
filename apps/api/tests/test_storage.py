@@ -80,6 +80,25 @@ def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability
             assert second.outcome == "already_exists"
             assert first.snapshot_key == second.snapshot_key
 
+            loaded = await store.get_snapshot(
+                first.snapshot_key,
+                principal_type="github_user",
+                principal_id=principal_id,
+            )
+            assert loaded.commit_sha == snapshot.commit_sha
+            with pytest.raises(SnapshotAccessDenied):
+                await store.get_snapshot(
+                    first.snapshot_key,
+                    principal_type="github_user",
+                    principal_id=f"other-user-{uuid4()}",
+                )
+            with pytest.raises(SnapshotAccessDenied):
+                await store.get_snapshot(
+                    f"missing:{first.snapshot_key}",
+                    principal_type="github_user",
+                    principal_id=principal_id,
+                )
+
             changed = snapshot.model_copy(deep=True)
             changed.facts.append(GenomeFact.observed(
                 repository=repository,
@@ -104,6 +123,27 @@ def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability
                         """),
                         {"digest": "0" * 64, "key": first.snapshot_key},
                     )
+
+            async with store._engine.begin() as connection:
+                await connection.execute(
+                    text("""
+                        UPDATE repository_access_grants
+                        SET revoked_at = now()
+                        WHERE principal_type = 'github_user'
+                          AND principal_id = :principal_id
+                          AND provider_repository_id = :repository_id
+                    """),
+                    {
+                        "principal_id": principal_id,
+                        "repository_id": repository_id,
+                    },
+                )
+            with pytest.raises(SnapshotAccessDenied):
+                await store.get_snapshot(
+                    first.snapshot_key,
+                    principal_type="github_user",
+                    principal_id=principal_id,
+                )
         finally:
             async with store._engine.begin() as connection:
                 await connection.execute(
