@@ -438,3 +438,52 @@ def test_repository_listing_requires_read_contents_installation_permission() -> 
                 await app.list_installation_repositories(456)
 
     asyncio.run(exercise())
+
+def test_repository_scoped_token_rejects_extra_permissions() -> None:
+    async def exercise() -> None:
+        private_pem, _ = make_app_key()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET":
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": 456,
+                        "app_id": 123,
+                        "account": {"id": 789, "login": "acme"},
+                        "target_type": "Organization",
+                        "repository_selection": "selected",
+                    },
+                )
+            return httpx.Response(
+                201,
+                json={
+                    "token": "over-scoped-token",
+                    "expires_at": "2026-11-17T00:00:00Z",
+                    "permissions": {"contents": "read", "issues": "write"},
+                    "repositories": [
+                        {"id": 999, "full_name": "acme/service-api"}
+                    ],
+                },
+            )
+
+        async with httpx.AsyncClient(
+            base_url="https://api.github.com",
+            transport=httpx.MockTransport(handler),
+        ) as http_client:
+            app = GitHubAppClient(
+                app_id=123,
+                private_key=private_pem,
+                client=http_client,
+            )
+            with pytest.raises(
+                GitHubAppAuthenticationError, match="repository identity"
+            ):
+                await app.create_repository_scoped_token(
+                    456,
+                    repository_id=999,
+                    owner="acme",
+                    repository_name="service-api",
+                )
+
+    asyncio.run(exercise())
