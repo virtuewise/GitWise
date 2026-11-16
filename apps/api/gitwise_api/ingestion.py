@@ -10,7 +10,6 @@ import httpx
 from fastapi import HTTPException, status
 
 from gitwise_api.architecture import extract_python_imports, module_name_for_path
-from gitwise_api.architecture import extract_python_imports, module_name_for_path
 from gitwise_api.genome import (
     ArchitectureEdge,
     ArchitectureNode,
@@ -25,7 +24,10 @@ MAX_TREE_ENTRIES = 2_000
 MAX_FILE_SIZE_BYTES = 1_000_000
 MAX_MANIFESTS_TO_READ = 40
 MAX_TOTAL_MANIFEST_BYTES = 5_000_000
-MAX_DEPENDENCY_FACTS = 1_000\nMAX_PYTHON_FILES_TO_READ = 100\nMAX_PYTHON_FILE_SIZE_BYTES = 256_000\nMAX_TOTAL_PYTHON_BYTES = 2_000_000
+MAX_DEPENDENCY_FACTS = 1_000
+MAX_PYTHON_FILES_TO_READ = 100
+MAX_PYTHON_FILE_SIZE_BYTES = 256_000
+MAX_TOTAL_PYTHON_BYTES = 2_000_000
 MANIFESTS = {
     "pyproject.toml": "python",
     "requirements.txt": "python",
@@ -384,7 +386,7 @@ class GitHubRepositoryClient:
                 continue
             try:
                 raw_content = base64.b64decode(
-                    re.sub(r"\\s+", "", encoded),
+                    re.sub(r"\s+", "", encoded),
                     validate=True,
                 )
                 if len(raw_content) > MAX_PYTHON_FILE_SIZE_BYTES:
