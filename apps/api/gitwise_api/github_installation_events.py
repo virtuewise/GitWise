@@ -9,7 +9,7 @@ from typing import Any
 from gitwise_api.github_app import GitHubAppClient
 from gitwise_api.installation_grants import InstallationGrantStore
 
-MAX_REPOSITORIES_PER_EVENT = 500
+MAX_REPOSITORIES_PER_EVENT = 5000
 
 
 class GitHubInstallationEventError(ValueError):
