@@ -15,7 +15,7 @@ PrincipalType = Literal["github_user", "github_app_installation"]
 
 
 class SnapshotAccessDenied(PermissionError):
-    """Raised when the caller has no active write grant for a repository."""
+    """Raised when the caller has no active grant for a repository."""
 
 
 class SnapshotContentConflict(RuntimeError):
@@ -60,11 +60,11 @@ class GenomeSnapshotStore:
         Missing snapshots and unauthorized snapshots intentionally produce the
         same error so callers cannot probe private repository history.
         """
-        if not principal_id or len(principal_id) > 255:
+        if not isinstance(principal_id, str) or not principal_id or len(principal_id) > 255:
             raise ValueError("A valid authenticated principal ID is required.")
         if principal_type not in ("github_user", "github_app_installation"):
             raise ValueError("Unsupported repository access principal type.")
-        if not snapshot_key or len(snapshot_key) > 512:
+        if not isinstance(snapshot_key, str) or not snapshot_key or len(snapshot_key) > 512:
             raise ValueError("A valid snapshot key is required.")
 
         async with self._engine.begin() as connection:
