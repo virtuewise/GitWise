@@ -12,12 +12,21 @@ from gitwise_api.config import Settings
 class FakeDeliveryStore:
     def __init__(self) -> None:
         self.deliveries: set[str] = set()
+        self.processed: set[str] = set()
 
     async def claim(self, *, delivery_id, event_name, payload):
         key = str(delivery_id)
-        outcome = "duplicate" if key in self.deliveries else "claimed"
+        outcome = "duplicate" if key in self.processed else (
+            "in_progress" if key in self.deliveries else "claimed"
+        )
         self.deliveries.add(key)
         return SimpleNamespace(delivery_id=delivery_id, outcome=outcome)
+
+    async def mark_processed(self, delivery_id):
+        self.processed.add(str(delivery_id))
+
+    async def mark_failed(self, delivery_id, *, error_code):
+        self.deliveries.discard(str(delivery_id))
 
 
 def test_github_ping_endpoint_authenticates_and_deduplicates(monkeypatch) -> None:
