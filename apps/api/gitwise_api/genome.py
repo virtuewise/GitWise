@@ -97,5 +97,7 @@ class SoftwareGenomeSnapshot(BaseModel):
     truncated: bool = False
     files_analyzed: int = 0
     tree: list[RepositoryTreeEntry] = Field(default_factory=list)
+    architecture_nodes: list[ArchitectureNode] = Field(default_factory=list)
+    architecture_edges: list[ArchitectureEdge] = Field(default_factory=list)
     facts: list[GenomeFact] = Field(default_factory=list)
     generated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
