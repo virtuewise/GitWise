@@ -194,6 +194,60 @@ def test_unsuspend_reconciles_current_installation_repositories() -> None:
 
     asyncio.run(exercise())
 
+def test_delayed_suspend_event_does_not_revoke_active_installation() -> None:
+    async def exercise() -> None:
+        app = FakeGitHubApp()
+        grants = FakeGrantStore()
+        result = await process_installation_event(
+            event_name="installation",
+            payload={
+                "action": "suspend",
+                "installation": {"id": 456, "app_id": 123},
+            },
+            app_id=123,
+            app=app,
+            grants=grants,
+        )
+        assert result == "reconciled:2;revoked:1"
+        assert grants.installation_revocations == []
+
+    asyncio.run(exercise())
+
+
+def test_currently_suspended_installation_revokes_all_grants() -> None:
+    class SuspendedGitHubApp(FakeGitHubApp):
+        async def verify_installation(
+            self, installation_id: int, *, allow_suspended: bool = False
+        ) -> GitHubAppInstallation:
+            self.verified.append(installation_id)
+            return GitHubAppInstallation(
+                installation_id=456,
+                app_id=123,
+                account_id=789,
+                account_login="acme",
+                target_type="Organization",
+                repository_selection="selected",
+                suspended_at="2026-11-17T00:00:00Z",
+            )
+
+    async def exercise() -> None:
+        app = SuspendedGitHubApp()
+        grants = FakeGrantStore()
+        result = await process_installation_event(
+            event_name="installation",
+            payload={
+                "action": "suspend",
+                "installation": {"id": 456, "app_id": 123},
+            },
+            app_id=123,
+            app=app,
+            grants=grants,
+        )
+        assert result == "revoked:2"
+        assert grants.installation_revocations == [456]
+
+    asyncio.run(exercise())
+
 def test_rejects_untrusted_installation_identity(installation) -> None:
     async def exercise() -> None:
         with pytest.raises(GitHubInstallationEventError):
