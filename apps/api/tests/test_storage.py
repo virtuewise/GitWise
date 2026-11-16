@@ -27,6 +27,7 @@ def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability
 
         repository_id = uuid4().int % (2**62) + 1
         principal_id = f"test-user-{uuid4()}"
+        installation_id = f"test-installation-{uuid4()}"
         repository = f"gitwise-integration/repo-{repository_id}"
         repository_url = f"https://github.com/{repository}"
         commit_sha = "a" * 40
@@ -69,6 +70,22 @@ def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability
                     """),
                     {"grant_id": str(uuid4()), "id": repository_id, "principal": principal_id},
                 )
+                await connection.execute(
+                    text("""
+                        INSERT INTO repository_access_grants (
+                            grant_id, provider, provider_repository_id, principal_type,
+                            principal_id, permission, granted_by
+                        ) VALUES (
+                            :grant_id, 'github', :id, 'github_app_installation',
+                            :principal, 'read', 'integration-test'
+                        )
+                    """),
+                    {
+                        "grant_id": str(uuid4()),
+                        "id": repository_id,
+                        "principal": installation_id,
+                    },
+                )
 
             first = await store.store_snapshot(
                 snapshot, principal_type="github_user", principal_id=principal_id
@@ -86,6 +103,12 @@ def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability
                 principal_id=principal_id,
             )
             assert loaded.commit_sha == snapshot.commit_sha
+            installation_read = await store.get_snapshot(
+                first.snapshot_key,
+                principal_type="github_app_installation",
+                principal_id=installation_id,
+            )
+            assert installation_read.commit_sha == snapshot.commit_sha
             with pytest.raises(SnapshotAccessDenied):
                 await store.get_snapshot(
                     first.snapshot_key,
@@ -129,12 +152,18 @@ def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability
                     text("""
                         UPDATE repository_access_grants
                         SET revoked_at = now()
-                        WHERE principal_type = 'github_user'
-                          AND principal_id = :principal_id
-                          AND provider_repository_id = :repository_id
+                        WHERE provider_repository_id = :repository_id
+                          AND (
+                              (principal_type = 'github_user' AND principal_id = :principal_id)
+                              OR (
+                                  principal_type = 'github_app_installation'
+                                  AND principal_id = :installation_id
+                              )
+                          )
                     """),
                     {
                         "principal_id": principal_id,
+                        "installation_id": installation_id,
                         "repository_id": repository_id,
                     },
                 )
