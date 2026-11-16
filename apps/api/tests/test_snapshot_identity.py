@@ -1,9 +1,9 @@
 from datetime import UTC, datetime
 
 import pytest
-from pydantic import ValidationError
 from gitwise_api.genome import GenomeFact, SoftwareGenomeSnapshot
 from gitwise_api.snapshot_identity import snapshot_content_digest, snapshot_storage_key
+from pydantic import ValidationError
 
 
 def make_snapshot(*, generated_at: datetime, repository_id: int = 42) -> SoftwareGenomeSnapshot:
