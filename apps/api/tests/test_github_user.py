@@ -46,8 +46,35 @@ def test_verifies_github_user_and_accessible_installations() -> None:
         assert [request.url.path for request in requests] == [
             "/user",
             "/user/installations",
-            "/user/installations",
         ]
+
+    asyncio.run(exercise())
+
+
+def test_pages_through_full_installation_pages() -> None:
+    async def exercise() -> None:
+        pages: list[int] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path == "/user":
+                return httpx.Response(200, json={"id": 789, "login": "maintainer"})
+            page = int(request.url.params["page"])
+            pages.append(page)
+            if page == 1:
+                return httpx.Response(
+                    200, json={"installations": [{"id": n} for n in range(1, 101)]}
+                )
+            return httpx.Response(200, json={"installations": [{"id": 101}]})
+
+        async with httpx.AsyncClient(
+            base_url="https://api.github.com",
+            transport=httpx.MockTransport(handler),
+        ) as http_client:
+            client = GitHubUserClient("session-managed-token", client=http_client)
+            user = await client.verify_user()
+
+        assert pages == [1, 2]
+        assert user.installation_ids == tuple(range(1, 102))
 
     asyncio.run(exercise())
 
