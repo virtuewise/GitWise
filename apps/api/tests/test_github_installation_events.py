@@ -161,8 +161,8 @@ def test_created_installation_provisions_only_verified_repositories() -> None:
             app=app,
             grants=grants,
         )
-        assert result == "granted:1"
-        assert grants.granted == [(9001,)]
+        assert result == "reconciled:2;revoked:1"
+        assert grants.reconciliations == [(9001, 9003)]
 
     asyncio.run(exercise())
 
