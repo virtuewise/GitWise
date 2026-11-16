@@ -38,6 +38,7 @@ class GenomeFact(BaseModel):
         value: Any,
         source_path: str | None = None,
         source_url: str | None = None,
+        extraction_method: str = "github_repository_metadata",
     ) -> GenomeFact:
         identity = f"{repository}:{commit_sha}:{fact_type}:{source_path or ''}:{value}"
         return cls(
@@ -48,6 +49,7 @@ class GenomeFact(BaseModel):
                 source_path=source_path,
                 source_url=source_url,
                 commit_sha=commit_sha,
+                extraction_method=extraction_method,
             )],
             confidence=1.0,
             verification_status="observed",
