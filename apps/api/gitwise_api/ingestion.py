@@ -108,12 +108,18 @@ class GitHubRepositoryClient:
         commit_sha = commit.get("sha")
         tree_sha = (commit.get("commit") or {}).get("tree", {}).get("sha")
         if not isinstance(commit_sha, str) or not isinstance(tree_sha, str):
-            raise HTTPException(status_code=502, detail="GitHub did not provide a valid branch commit.")
+            raise HTTPException(
+                status_code=502,
+                detail="GitHub did not provide a valid branch commit.",
+            )
 
         tree_payload = await self._get(f"{base}/git/trees/{quote(tree_sha, safe='')}")
         raw_tree = tree_payload.get("tree")
         if not isinstance(raw_tree, list):
-            raise HTTPException(status_code=502, detail="GitHub did not provide a valid repository tree.")
+            raise HTTPException(
+                status_code=502,
+                detail="GitHub did not provide a valid repository tree.",
+            )
 
         entries: list[RepositoryTreeEntry] = []
         for item in raw_tree[:MAX_TREE_ENTRIES]:
@@ -180,7 +186,9 @@ class GitHubRepositoryClient:
                     fact_type="project.manifest",
                     value={"ecosystem": ecosystem, "path": path},
                     source_path=path,
-                    source_url=f"{repository.canonical_url}/blob/{commit_sha}/{quote(path, safe='/')}",
+                    source_url=(
+                        f"{repository.canonical_url}/blob/{commit_sha}/{quote(path, safe='/')}"
+                    ),
                 ))
 
         readme_paths = sorted(
