@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 
 class WebhookDeliveryConflict(RuntimeError):
@@ -31,6 +31,15 @@ class GitHubWebhookDeliveryStore:
 
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
+
+    @classmethod
+    def from_url(cls, database_url: str) -> GitHubWebhookDeliveryStore:
+        if not database_url.startswith("postgresql+asyncpg://"):
+            raise ValueError("GITWISE_DATABASE_URL must use postgresql+asyncpg.")
+        return cls(create_async_engine(database_url, pool_pre_ping=True))
+
+    async def close(self) -> None:
+        await self._engine.dispose()
 
     async def claim(
         self,
