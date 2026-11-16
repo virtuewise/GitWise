@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -23,6 +23,7 @@ class GitHubAppInstallation:
     target_type: str
     repository_selection: str
     suspended_at: str | None = None
+    permissions: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,8 @@ class GitHubAppClient:
     installation-scoped token is requested. Tokens should be kept in memory,
     scoped to the smallest repository set, and never logged or persisted.
     """
+
+    MAX_INSTALLATION_REPOSITORIES = 5000
 
     def __init__(
         self,
@@ -96,6 +99,7 @@ class GitHubAppClient:
             target_type = payload["target_type"]
             repository_selection = payload["repository_selection"]
             suspended_at = payload.get("suspended_at")
+            permissions = payload.get("permissions", {})
         except (KeyError, TypeError, ValueError) as exc:
             raise GitHubAppAuthenticationError(
                 "GitHub returned an invalid installation identity response."
@@ -113,6 +117,8 @@ class GitHubAppClient:
             or target_type not in ("User", "Organization")
             or repository_selection not in ("all", "selected")
             or (suspended_at is not None and not isinstance(suspended_at, str))
+            or not isinstance(permissions, dict)
+            or any(not isinstance(key, str) or not isinstance(value, str) for key, value in permissions.items())
         ):
             raise GitHubAppAuthenticationError(
                 "The installation identity does not match the configured GitHub App."
@@ -129,6 +135,7 @@ class GitHubAppClient:
             target_type=target_type,
             repository_selection=repository_selection,
             suspended_at=suspended_at,
+            permissions=permissions,
         )
 
     async def create_installation_token(
@@ -206,6 +213,118 @@ class GitHubAppClient:
             repositories=tuple(
                 item for item in repositories_payload if isinstance(item, dict)
             ),
+        )
+
+    async def list_installation_repositories(
+        self,
+        installation_id: int,
+    ) -> tuple[GitHubAppInstallation, tuple[dict[str, Any], ...]]:
+        """List current installation membership using a metadata-only token."""
+        installation = await self.verify_installation(installation_id)
+        if installation.permissions.get("contents") != "read":
+            raise GitHubAppAuthenticationError(
+                "The GitHub App installation does not have read-only contents permission."
+            )
+
+        response = await self._client.post(
+            f"/app/installations/{installation_id}/access_tokens",
+            headers={"Authorization": f"Bearer {self._app_jwt()}"},
+            json={"permissions": {"metadata": "read"}},
+        )
+        if response.status_code != 201:
+            raise GitHubAppAuthenticationError(
+                "GitHub refused to create a metadata-only installation token."
+            )
+        try:
+            token_payload = response.json()
+            access_token = token_payload["token"]
+            token_permissions = token_payload["permissions"]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise GitHubAppAuthenticationError(
+                "GitHub returned an invalid metadata-only token response."
+            ) from exc
+        if (
+            not isinstance(access_token, str)
+            or not access_token
+            or not isinstance(token_permissions, dict)
+            or token_permissions.get("metadata") != "read"
+            or any(key != "metadata" for key in token_permissions)
+        ):
+            raise GitHubAppAuthenticationError(
+                "GitHub returned a token with an unexpected permission scope."
+            )
+
+        repositories: list[dict[str, Any]] = []
+        seen_ids: set[int] = set()
+        total_count: int | None = None
+        for page in range(1, 51):
+            page_response = await self._client.get(
+                "/installation/repositories",
+                params={"per_page": 100, "page": page},
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if page_response.status_code != 200:
+                raise GitHubAppAuthenticationError(
+                    "GitHub could not list repositories accessible to the installation."
+                )
+            try:
+                page_payload = page_response.json()
+                page_total = page_payload["total_count"]
+                page_repositories = page_payload["repositories"]
+            except (KeyError, TypeError, ValueError) as exc:
+                raise GitHubAppAuthenticationError(
+                    "GitHub returned an invalid installation repository list."
+                ) from exc
+            if (
+                type(page_total) is not int
+                or page_total < 0
+                or not isinstance(page_repositories, list)
+                or len(page_repositories) > 100
+                or (total_count is not None and page_total != total_count)
+            ):
+                raise GitHubAppAuthenticationError(
+                    "GitHub returned an inconsistent installation repository list."
+                )
+            total_count = page_total
+            for repository in page_repositories:
+                if not isinstance(repository, dict):
+                    raise GitHubAppAuthenticationError(
+                        "GitHub returned invalid repository metadata."
+                    )
+                repository_id = repository.get("id")
+                full_name = repository.get("full_name")
+                is_private = repository.get("private")
+                if (
+                    type(repository_id) is not int
+                    or repository_id < 1
+                    or repository_id in seen_ids
+                    or not isinstance(full_name, str)
+                    or full_name.count("/") != 1
+                    or not isinstance(is_private, bool)
+                ):
+                    raise GitHubAppAuthenticationError(
+                        "GitHub returned invalid repository identity metadata."
+                    )
+                owner = full_name.split("/", 1)[0]
+                if owner.casefold() != installation.account_login.casefold():
+                    raise GitHubAppAuthenticationError(
+                        "A listed repository does not belong to the installation account."
+                    )
+                seen_ids.add(repository_id)
+                repositories.append(repository)
+                if len(repositories) > self.MAX_INSTALLATION_REPOSITORIES:
+                    raise GitHubAppAuthenticationError(
+                        "The installation repository list exceeds the safety limit."
+                    )
+            if len(repositories) == total_count:
+                return installation, tuple(repositories)
+            if len(page_repositories) < 100:
+                raise GitHubAppAuthenticationError(
+                    "GitHub returned an incomplete installation repository list."
+                )
+
+        raise GitHubAppAuthenticationError(
+            "The installation repository list exceeds the supported page limit."
         )
 
     async def create_repository_scoped_token(
