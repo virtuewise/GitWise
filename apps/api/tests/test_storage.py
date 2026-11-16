@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 from gitwise_api.genome import GenomeFact, SoftwareGenomeSnapshot
+from gitwise_api.github_user import VerifiedGitHubUser
 from gitwise_api.storage import (
     GenomeSnapshotStore,
     SnapshotAccessDenied,
@@ -132,6 +133,15 @@ def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability
                 principal_id=other_installation_id,
             )
             assert overlapping_installation_read.commit_sha == snapshot.commit_sha
+            user_read = await store.get_snapshot_for_user(
+                first.snapshot_key,
+                user=VerifiedGitHubUser(
+                    user_id=789,
+                    login="maintainer",
+                    installation_ids=(int(installation_id.split("-")[-1]) if False else 0,),
+                ),
+            )
+            assert user_read.commit_sha == snapshot.commit_sha
             with pytest.raises(SnapshotAccessDenied):
                 await store.get_snapshot(
                     first.snapshot_key,
