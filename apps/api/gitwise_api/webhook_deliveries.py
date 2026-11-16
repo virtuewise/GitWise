@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -19,6 +19,7 @@ class WebhookDeliveryResult:
     delivery_id: UUID
     outcome: str
     attempt_count: int = 0
+    claim_token: UUID | None = None
 
 
 class GitHubWebhookDeliveryStore:
@@ -101,22 +102,30 @@ class GitHubWebhookDeliveryStore:
                         delivery_id, "in_progress", row["attempt_count"]
                     )
 
+            claim_token = uuid4()
             updated = await connection.execute(
                 text("""
                     UPDATE github_webhook_deliveries
                     SET processing_status = 'processing',
                         attempt_count = attempt_count + 1,
                         lease_expires_at = now() + make_interval(secs => :lease_seconds),
+                        claim_token = :claim_token,
                         last_error_code = NULL,
                         updated_at = now()
                     WHERE delivery_id = :delivery_id
                     RETURNING attempt_count
                 """),
-                {"delivery_id": str(delivery_id), "lease_seconds": self.LEASE_SECONDS},
+                {
+                    "delivery_id": str(delivery_id),
+                    "lease_seconds": self.LEASE_SECONDS,
+                    "claim_token": str(claim_token),
+                },
             )
-            return WebhookDeliveryResult(delivery_id, "claimed", updated.scalar_one())
+            return WebhookDeliveryResult(
+                delivery_id, "claimed", updated.scalar_one(), claim_token
+            )
 
-    async def mark_processed(self, delivery_id: UUID) -> None:
+    async def mark_processed(self, delivery_id: UUID, *, claim_token: UUID) -> None:
         async with self._engine.begin() as connection:
             result = await connection.execute(
                 text("""
@@ -124,17 +133,21 @@ class GitHubWebhookDeliveryStore:
                     SET processing_status = 'processed',
                         processed_at = now(),
                         lease_expires_at = NULL,
+                        claim_token = NULL,
                         last_error_code = NULL,
                         updated_at = now()
                     WHERE delivery_id = :delivery_id
                       AND processing_status = 'processing'
+                      AND claim_token = :claim_token
                 """),
-                {"delivery_id": str(delivery_id)},
+                {"delivery_id": str(delivery_id), "claim_token": str(claim_token)},
             )
             if result.rowcount != 1:
-                raise RuntimeError("Webhook delivery is not owned by an active processing lease.")
+                raise RuntimeError("Webhook delivery claim is stale or no longer active.")
 
-    async def mark_failed(self, delivery_id: UUID, *, error_code: str) -> None:
+    async def mark_failed(
+        self, delivery_id: UUID, *, claim_token: UUID, error_code: str
+    ) -> None:
         if not error_code or len(error_code) > 100:
             raise ValueError("A bounded, non-empty error code is required.")
         async with self._engine.begin() as connection:
@@ -143,12 +156,18 @@ class GitHubWebhookDeliveryStore:
                     UPDATE github_webhook_deliveries
                     SET processing_status = 'failed',
                         lease_expires_at = NULL,
+                        claim_token = NULL,
                         last_error_code = :error_code,
                         updated_at = now()
                     WHERE delivery_id = :delivery_id
                       AND processing_status = 'processing'
+                      AND claim_token = :claim_token
                 """),
-                {"delivery_id": str(delivery_id), "error_code": error_code},
+                {
+                    "delivery_id": str(delivery_id),
+                    "claim_token": str(claim_token),
+                    "error_code": error_code,
+                },
             )
             if result.rowcount != 1:
-                raise RuntimeError("Webhook delivery is not owned by an active processing lease.")
+                raise RuntimeError("Webhook delivery claim is stale or no longer active.")
