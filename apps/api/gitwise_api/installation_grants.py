@@ -138,6 +138,123 @@ class InstallationGrantStore:
                 )
         return len(normalized)
 
+    async def apply_repository_changes(
+        self,
+        installation: GitHubAppInstallation,
+        repositories_to_grant: Sequence[dict[str, object]],
+        repository_ids_to_revoke: Sequence[int],
+    ) -> tuple[int, int]:
+        """Apply additions and removals for one installation in one transaction."""
+        if (
+            type(installation.installation_id) is not int
+            or installation.installation_id < 1
+            or type(installation.app_id) is not int
+            or installation.app_id < 1
+            or type(installation.account_id) is not int
+            or installation.account_id < 1
+            or not installation.account_login
+        ):
+            raise InstallationGrantError("Verified installation identity is required.")
+
+        normalized: dict[int, tuple[str, str, bool]] = {}
+        for repository in repositories_to_grant:
+            if not isinstance(repository, dict):
+                raise InstallationGrantError("GitHub returned invalid repository metadata.")
+            repository_id = repository.get("id")
+            full_name = repository.get("full_name")
+            is_private = repository.get("private", False)
+            if (
+                type(repository_id) is not int
+                or repository_id < 1
+                or not isinstance(full_name, str)
+                or full_name.count("/") != 1
+                or not isinstance(is_private, bool)
+            ):
+                raise InstallationGrantError("GitHub returned invalid repository metadata.")
+            owner, name = full_name.split("/", 1)
+            if (
+                not owner
+                or not name
+                or owner.casefold() != installation.account_login.casefold()
+            ):
+                raise InstallationGrantError(
+                    "Repository owner does not match the verified installation account."
+                )
+            normalized[repository_id] = (owner, name, is_private)
+        if len(normalized) != len(repositories_to_grant):
+            raise InstallationGrantError("Duplicate repository IDs are not allowed.")
+
+        revoke_ids = self._validated_repository_ids(repository_ids_to_revoke)
+        if set(normalized).intersection(revoke_ids):
+            raise InstallationGrantError(
+                "A repository cannot be added and removed in the same event."
+            )
+
+        async with self._engine.begin() as connection:
+            for repository_id, (owner, name, is_private) in normalized.items():
+                await connection.execute(
+                    text("""
+                        INSERT INTO provider_repositories (
+                            provider, provider_repository_id, owner_login,
+                            repository_name, canonical_url, is_private
+                        ) VALUES (
+                            'github', :repository_id, :owner, :name, :url, :is_private
+                        )
+                        ON CONFLICT (provider, provider_repository_id) DO UPDATE SET
+                            owner_login = EXCLUDED.owner_login,
+                            repository_name = EXCLUDED.repository_name,
+                            canonical_url = EXCLUDED.canonical_url,
+                            is_private = EXCLUDED.is_private,
+                            updated_at = now()
+                    """),
+                    {
+                        "repository_id": repository_id,
+                        "owner": owner,
+                        "name": name,
+                        "url": f"https://github.com/{owner}/{name}",
+                        "is_private": is_private,
+                    },
+                )
+                await connection.execute(
+                    text("""
+                        INSERT INTO repository_access_grants (
+                            grant_id, provider, provider_repository_id,
+                            principal_type, principal_id, permission, granted_by
+                        ) VALUES (
+                            gen_random_uuid(), 'github', :repository_id,
+                            'github_app_installation', :installation_id, 'read',
+                            :granted_by
+                        )
+                        ON CONFLICT (
+                            provider, provider_repository_id, principal_type, principal_id
+                        ) WHERE revoked_at IS NULL
+                        DO UPDATE SET
+                            permission = EXCLUDED.permission,
+                            granted_by = EXCLUDED.granted_by
+                    """),
+                    {
+                        "repository_id": repository_id,
+                        "installation_id": str(installation.installation_id),
+                        "granted_by": f"github_app:{installation.app_id}",
+                    },
+                )
+            revoked = await connection.execute(
+                text("""
+                    UPDATE repository_access_grants
+                    SET revoked_at = now()
+                    WHERE provider = 'github'
+                      AND principal_type = 'github_app_installation'
+                      AND principal_id = :installation_id
+                      AND provider_repository_id = ANY(:repository_ids)
+                      AND revoked_at IS NULL
+                """),
+                {
+                    "installation_id": str(installation.installation_id),
+                    "repository_ids": revoke_ids,
+                },
+            )
+            return len(normalized), revoked.rowcount
+
     async def revoke_repositories(
         self,
         installation_id: int,
