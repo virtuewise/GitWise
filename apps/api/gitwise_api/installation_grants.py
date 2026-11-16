@@ -44,7 +44,16 @@ class InstallationGrantStore:
         The repository IDs and names must come from the GitHub installation
         token response, not the webhook's untrusted JSON body.
         """
-        if installation.installation_id < 1 or installation.account_id < 1:
+        if (
+            type(installation.installation_id) is not int
+            or installation.installation_id < 1
+            or type(installation.app_id) is not int
+            or installation.app_id < 1
+            or type(installation.account_id) is not int
+            or installation.account_id < 1
+            or not isinstance(installation.account_login, str)
+            or not installation.account_login
+        ):
             raise InstallationGrantError("Verified installation identity is required.")
         if not repositories:
             raise InstallationGrantError("At least one verified repository is required.")
