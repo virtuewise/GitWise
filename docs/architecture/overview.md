@@ -44,11 +44,11 @@ Facts must be traceable to repository evidence. Avoid presenting inferred archit
 
 - GitHub REST calls use explicit connect/request timeouts and map missing repositories, rate limits, and upstream failures to controlled API errors.
 - The recursive tree response is capped at 2,000 entries; individual blobs above 1 MB are excluded from the analyzed tree inventory.
-- The ingestion pass requests the recursive commit-pinned Git tree and reads only selected dependency manifests by Git blob SHA. It does not follow symlinks or execute repository code.
+- The ingestion pass requests the recursive commit-pinned Git tree and reads selected dependency manifests and bounded Python source files by Git blob SHA. Python architecture analysis uses the standard-library AST parser; it does not import, execute, or follow symlinks in repository code.
 - Manifest extraction is bounded by file count, per-file size, aggregate bytes, and a maximum number of emitted dependency facts.
 - Initial parsers cover Python `pyproject.toml` and `requirements.txt`, npm `package.json`, Rust `Cargo.toml`, and Go `go.mod`. Unsupported formats and malformed manifests are skipped rather than guessed.
 - Dependency facts describe declarations only; they do not establish installation, runtime usage, vulnerability status, or compatibility.
-- Facts are observed only when directly supported by GitHub metadata or a path in the commit-pinned tree. Architecture and dependency relationships remain future analysis stages.
+- Dependency facts describe declarations only; they do not establish installation, runtime usage, vulnerability status, or compatibility.\n- The initial Python architecture graph links only imports that resolve unambiguously to modules in the inspected tree. Each edge records its source path, line number, commit SHA, and extraction method.\n- Architecture analysis reports discovered, selected, and analyzed file counts plus explicit limitations. A partial graph must never be presented as complete.
 
 ## Security boundaries
 
@@ -66,4 +66,4 @@ Facts must be traceable to repository evidence. Avoid presenting inferred archit
 2. Safe GitHub repository URL parsing and metadata ingestion.
 3. File-tree and manifest analysis.
 4. Versioned Software Genome schema.
-5. Repository overview endpoint and first web screen.
+5. Repository overview endpoint and first web screen.\n6. Commit-pinned Python import graph with explicit completeness metadata.
