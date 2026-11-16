@@ -134,7 +134,11 @@ async def receive_github_webhook(request: Request) -> dict[str, str]:
         await delivery_store.mark_processed(delivery_id, claim_token=result.claim_token)
     except Exception as exc:
         try:
-            await delivery_store.mark_failed(\n                delivery_id, claim_token=result.claim_token, error_code="handler_failure"\n            )
+            await delivery_store.mark_failed(
+                delivery_id,
+                claim_token=result.claim_token,
+                error_code="handler_failure",
+            )
         except RuntimeError:
             pass
         raise HTTPException(
