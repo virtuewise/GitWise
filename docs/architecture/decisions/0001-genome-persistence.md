@@ -1,6 +1,6 @@
 # ADR 0001: Immutable Software Genome snapshot identity and persistence
 
-- **Status:** Accepted as the persistence contract; backend implementation is deferred.
+- **Status:** Accepted; initial PostgreSQL schema and transactional store are implemented. Runtime API integration remains deferred.
 - **Date:** 2026-11-16
 - **Decision owners:** GitWise maintainers
 
@@ -43,7 +43,7 @@ A durable write must be insert-if-absent. If the key already exists, compare the
 - Store a canonical content digest to detect corruption and unexpected non-determinism.
 - Keep the original requested ref as provenance/display metadata, not identity.
 
-### 4. PostgreSQL is the preferred canonical store, not a current runtime dependency
+### 4. PostgreSQL is the canonical persistence backend, but not yet an API runtime dependency
 
 PostgreSQL is the preferred first durable backend because it supports transactional uniqueness, relational access-control joins, indexing, and JSONB for versioned Genome payloads. The initial implementation should use migrations and explicit repository/access-grant/snapshot tables. Avoid adding vector storage until measured retrieval needs justify it.
 
@@ -57,7 +57,7 @@ Define retention per repository owner before production storage. Deletion must r
 
 1. **Completed:** expose GitHub's immutable numeric repository ID in new Software Genome snapshots.
 2. **Completed:** add backend-neutral canonical snapshot keys and content digests, with timestamp/order invariance tests; preserve semantically ordered arrays inside fact values.
-3. **Initial implementation:** add PostgreSQL migrations for provider repositories, revocable principal grants, and immutable snapshots; add a transactional insert-if-absent store that requires an active write grant and rejects digest conflicts. The store is not yet wired to an authenticated API or deployed database.
+3. **Implemented, integration verification in CI:** PostgreSQL migrations define provider repositories, revocable principal grants, and immutable snapshots. The transactional insert-if-absent store requires an active write grant and rejects digest conflicts. CI provisions PostgreSQL 16, applies the migrations, and exercises authorization denial, idempotent writes, digest conflicts, and database-enforced immutability. The store is not yet wired to an authenticated API or deployed database.
 4. Add verified GitHub identity/installation grant provisioning, revocation workflows, and authorization tests before exposing snapshot operations.
 5. Add retention, deletion, audit, and installation-revocation workflows.
 6. Add historical retrieval and comparisons over stored snapshots; then add incremental refresh.
