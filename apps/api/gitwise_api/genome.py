@@ -84,6 +84,16 @@ class ArchitectureEdge(BaseModel):
     extraction_method: str = "python_ast_import_analyzer"
 
 
+class ArchitectureAnalysis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["complete", "partial"] = "complete"
+    files_discovered: int = Field(default=0, ge=0)
+    files_selected: int = Field(default=0, ge=0)
+    files_analyzed: int = Field(default=0, ge=0)
+    limitations: list[str] = Field(default_factory=list)
+
+
 class SoftwareGenomeSnapshot(BaseModel):
     schema_version: Literal["1.0"] = "1.0"
     repository: str
@@ -97,6 +107,7 @@ class SoftwareGenomeSnapshot(BaseModel):
     truncated: bool = False
     files_analyzed: int = 0
     tree: list[RepositoryTreeEntry] = Field(default_factory=list)
+    architecture_analysis: ArchitectureAnalysis = Field(default_factory=ArchitectureAnalysis)
     architecture_nodes: list[ArchitectureNode] = Field(default_factory=list)
     architecture_edges: list[ArchitectureEdge] = Field(default_factory=list)
     facts: list[GenomeFact] = Field(default_factory=list)
