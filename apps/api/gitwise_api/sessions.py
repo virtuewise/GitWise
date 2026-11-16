@@ -1,0 +1,332 @@
+"""One-time OAuth state and server-managed user sessions.
+
+Browsers only ever hold an opaque session token and a CSRF token. GitHub user
+tokens stay on the server, encrypted at rest, and are never returned to callers
+except through ``SessionStore.access_token`` for server-side GitHub calls.
+Expiry decisions use the database clock so workers cannot disagree about time.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import secrets
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from uuid import UUID, uuid4
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+
+from gitwise_api.token_crypto import TokenCipher, TokenCryptoError
+
+MAX_TOKEN_LENGTH = 256
+
+
+class AuthorizationStateError(RuntimeError):
+    """OAuth state is unknown, expired, or already used. Deliberately uniform."""
+
+
+class SessionError(RuntimeError):
+    """A session could not be created or changed."""
+
+
+@dataclass(frozen=True)
+class AuthorizationStart:
+    state: str
+    code_challenge: str
+
+
+@dataclass(frozen=True)
+class IssuedSession:
+    session_token: str
+    csrf_token: str
+    expires_at: datetime
+
+
+@dataclass(frozen=True)
+class AuthenticatedSession:
+    session_id: UUID
+    github_user_id: int
+    github_login: str
+    csrf_hash: bytes
+
+
+def _digest(value: str) -> bytes:
+    return hashlib.sha256(value.encode("utf-8")).digest()
+
+
+def _plausible_token(value: object) -> bool:
+    return isinstance(value, str) and 0 < len(value) <= MAX_TOKEN_LENGTH
+
+
+class SessionStore:
+    """PostgreSQL-backed OAuth state and session lifecycle."""
+
+    def __init__(
+        self,
+        engine: AsyncEngine,
+        cipher: TokenCipher,
+        *,
+        state_ttl: timedelta = timedelta(minutes=10),
+        idle_ttl: timedelta = timedelta(hours=8),
+        absolute_ttl: timedelta = timedelta(hours=24),
+    ) -> None:
+        if idle_ttl > absolute_ttl:
+            raise ValueError("Idle session lifetime cannot exceed the absolute lifetime.")
+        self._engine = engine
+        self._cipher = cipher
+        self._state_ttl = state_ttl
+        self._idle_ttl = idle_ttl
+        self._absolute_ttl = absolute_ttl
+
+    @classmethod
+    def from_url(cls, database_url: str, cipher: TokenCipher, **options) -> SessionStore:
+        if not database_url.startswith("postgresql+asyncpg://"):
+            raise ValueError("GITWISE_DATABASE_URL must use postgresql+asyncpg.")
+        return cls(create_async_engine(database_url, pool_pre_ping=True), cipher, **options)
+
+    async def close(self) -> None:
+        await self._engine.dispose()
+
+    # OAuth state -----------------------------------------------------------
+
+    async def begin_authorization(self) -> AuthorizationStart:
+        """Create single-use state and a PKCE challenge; the verifier stays server-side."""
+        state = secrets.token_urlsafe(32)
+        verifier = secrets.token_urlsafe(48)
+        challenge = (
+            base64.urlsafe_b64encode(hashlib.sha256(verifier.encode("ascii")).digest())
+            .rstrip(b"=")
+            .decode("ascii")
+        )
+        async with self._engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "DELETE FROM oauth_authorization_states "
+                    "WHERE expires_at < now() - interval '1 day'"
+                )
+            )
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO oauth_authorization_states
+                        (state_hash, encrypted_code_verifier, expires_at)
+                    VALUES (:state_hash, :verifier, now() + make_interval(secs => :ttl))
+                    """
+                ),
+                {
+                    "state_hash": _digest(state),
+                    "verifier": self._cipher.encrypt(verifier),
+                    "ttl": self._state_ttl.total_seconds(),
+                },
+            )
+        return AuthorizationStart(state=state, code_challenge=challenge)
+
+    async def consume_authorization(self, state: str) -> str:
+        """Atomically spend a state value and return its PKCE verifier.
+
+        Unknown, expired and replayed state all fail identically.
+        """
+        if not _plausible_token(state):
+            raise AuthorizationStateError("Invalid OAuth state.")
+        async with self._engine.begin() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        """
+                        UPDATE oauth_authorization_states
+                        SET consumed_at = now()
+                        WHERE state_hash = :state_hash
+                          AND consumed_at IS NULL
+                          AND expires_at > now()
+                        RETURNING encrypted_code_verifier
+                        """
+                    ),
+                    {"state_hash": _digest(state)},
+                )
+            ).first()
+        if row is None:
+            raise AuthorizationStateError("Invalid OAuth state.")
+        try:
+            return self._cipher.decrypt(row[0])
+        except TokenCryptoError:
+            raise AuthorizationStateError("Invalid OAuth state.") from None
+
+    # Sessions --------------------------------------------------------------
+
+    async def create_session(
+        self,
+        *,
+        github_user_id: int,
+        github_login: str,
+        access_token: str,
+        refresh_token: str | None = None,
+        access_token_expires_in: int | None = None,
+    ) -> IssuedSession:
+        """Create a session for an identity GitHub has already verified."""
+        if type(github_user_id) is not int or github_user_id < 1:
+            raise SessionError("A verified GitHub user ID is required.")
+        if not isinstance(github_login, str) or not 0 < len(github_login) <= 255:
+            raise SessionError("A verified GitHub login is required.")
+        session_token = secrets.token_urlsafe(32)
+        csrf_token = secrets.token_urlsafe(32)
+        async with self._engine.begin() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        """
+                        INSERT INTO user_sessions (
+                            session_id, token_hash, csrf_hash, github_user_id, github_login,
+                            encrypted_access_token, encrypted_refresh_token,
+                            access_token_expires_at, idle_expires_at, absolute_expires_at
+                        )
+                        VALUES (
+                            :session_id, :token_hash, :csrf_hash, :user_id, :login,
+                            :access, :refresh,
+                            CASE WHEN CAST(:expires_in AS INTEGER) IS NULL THEN NULL
+                                 ELSE now() + make_interval(secs => :expires_in) END,
+                            now() + make_interval(secs => :idle),
+                            now() + make_interval(secs => :absolute)
+                        )
+                        RETURNING idle_expires_at
+                        """
+                    ),
+                    {
+                        "session_id": uuid4(),
+                        "token_hash": _digest(session_token),
+                        "csrf_hash": _digest(csrf_token),
+                        "user_id": github_user_id,
+                        "login": github_login,
+                        "access": self._cipher.encrypt(access_token),
+                        "refresh": self._cipher.encrypt(refresh_token) if refresh_token else None,
+                        "expires_in": access_token_expires_in,
+                        "idle": self._idle_ttl.total_seconds(),
+                        "absolute": self._absolute_ttl.total_seconds(),
+                    },
+                )
+            ).one()
+        return IssuedSession(session_token, csrf_token, row[0])
+
+    async def resolve_session(self, session_token: str) -> AuthenticatedSession | None:
+        """Return the session for a live token, extending its idle window."""
+        if not _plausible_token(session_token):
+            return None
+        async with self._engine.begin() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        """
+                        UPDATE user_sessions
+                        SET last_seen_at = now(),
+                            idle_expires_at = LEAST(
+                                now() + make_interval(secs => :idle), absolute_expires_at
+                            )
+                        WHERE token_hash = :token_hash
+                          AND revoked_at IS NULL
+                          AND idle_expires_at > now()
+                          AND absolute_expires_at > now()
+                        RETURNING session_id, github_user_id, github_login, csrf_hash
+                        """
+                    ),
+                    {
+                        "token_hash": _digest(session_token),
+                        "idle": self._idle_ttl.total_seconds(),
+                    },
+                )
+            ).first()
+        if row is None:
+            return None
+        return AuthenticatedSession(row[0], row[1], row[2], bytes(row[3]))
+
+    @staticmethod
+    def csrf_matches(session: AuthenticatedSession, csrf_token: str | None) -> bool:
+        """Constant-time CSRF check for state-changing requests."""
+        if not _plausible_token(csrf_token):
+            return False
+        return hmac.compare_digest(session.csrf_hash, _digest(csrf_token))
+
+    async def access_token(self, session: AuthenticatedSession) -> str:
+        """Decrypt the user's GitHub token for a server-side GitHub call."""
+        async with self._engine.connect() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT encrypted_access_token FROM user_sessions
+                        WHERE session_id = :session_id
+                          AND revoked_at IS NULL
+                          AND idle_expires_at > now()
+                          AND absolute_expires_at > now()
+                        """
+                    ),
+                    {"session_id": session.session_id},
+                )
+            ).first()
+        if row is None:
+            raise SessionError("Session is no longer valid.")
+        try:
+            return self._cipher.decrypt(row[0])
+        except TokenCryptoError:
+            raise SessionError("Session is no longer valid.") from None
+
+    async def rotate_session(self, session_token: str) -> IssuedSession | None:
+        """Replace the session and CSRF tokens; the previous ones stop working at once."""
+        if not _plausible_token(session_token):
+            return None
+        new_session_token = secrets.token_urlsafe(32)
+        new_csrf_token = secrets.token_urlsafe(32)
+        async with self._engine.begin() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        """
+                        UPDATE user_sessions
+                        SET token_hash = :new_token_hash,
+                            csrf_hash = :new_csrf_hash,
+                            rotated_at = now(),
+                            last_seen_at = now()
+                        WHERE token_hash = :old_token_hash
+                          AND revoked_at IS NULL
+                          AND idle_expires_at > now()
+                          AND absolute_expires_at > now()
+                        RETURNING idle_expires_at
+                        """
+                    ),
+                    {
+                        "new_token_hash": _digest(new_session_token),
+                        "new_csrf_hash": _digest(new_csrf_token),
+                        "old_token_hash": _digest(session_token),
+                    },
+                )
+            ).first()
+        if row is None:
+            return None
+        return IssuedSession(new_session_token, new_csrf_token, row[0])
+
+    async def revoke_session(self, session_token: str) -> bool:
+        """Log out one session."""
+        if not _plausible_token(session_token):
+            return False
+        async with self._engine.begin() as connection:
+            result = await connection.execute(
+                text(
+                    "UPDATE user_sessions SET revoked_at = now() "
+                    "WHERE token_hash = :token_hash AND revoked_at IS NULL"
+                ),
+                {"token_hash": _digest(session_token)},
+            )
+        return result.rowcount == 1
+
+    async def revoke_user_sessions(self, github_user_id: int) -> int:
+        """Invalidate every active session for one verified GitHub user."""
+        async with self._engine.begin() as connection:
+            result = await connection.execute(
+                text(
+                    "UPDATE user_sessions SET revoked_at = now() "
+                    "WHERE github_user_id = :user_id AND revoked_at IS NULL"
+                ),
+                {"user_id": github_user_id},
+            )
+        return result.rowcount
