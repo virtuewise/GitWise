@@ -103,6 +103,6 @@ def test_installation_grants_are_idempotent_and_isolated() -> None:
                         "repo_two": second_repository_id,
                     },
                 )
-            await store._engine.dispose()
+            await store.close()
 
     asyncio.run(exercise())
