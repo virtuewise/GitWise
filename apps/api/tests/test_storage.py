@@ -4,15 +4,15 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
+
 from gitwise_api.genome import SoftwareGenomeSnapshot
 from gitwise_api.storage import (
     GenomeSnapshotStore,
     SnapshotAccessDenied,
     SnapshotContentConflict,
 )
-
-from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
 
 DATABASE_URL = os.getenv("GITWISE_DATABASE_URL")
 
