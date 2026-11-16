@@ -20,7 +20,7 @@ See [the detailed roadmap](docs/roadmap.md) for scope, acceptance goals, and del
 
 ## Current project status
 
-GitWise is at the foundation stage, beginning with Phase 1. The first vertical slice is a read-only repository intelligence service that can safely inspect a repository, produce a structured project snapshot, and explain findings with links back to source files.
+GitWise is at the foundation stage, beginning with Phase 1. The first vertical slice is a read-only repository intelligence service. `POST /repositories/inspect` resolves a public GitHub repository, pins analysis to its default-branch commit, reads a bounded Git tree, and returns a versioned Software Genome snapshot with evidence-linked facts. The service does not download or execute repository code.
 
 ## Product principles
 
@@ -33,7 +33,7 @@ GitWise is at the foundation stage, beginning with Phase 1. The first vertical s
 
 ## Initial capabilities
 
-- **Repository Intelligence** — understand repository structure, languages, frameworks, and key project files.
+- **Repository Intelligence** — inspect public repository metadata and a bounded file tree; identify common project manifests and documentation entrypoints.
 - **Architecture Vision** — map modules and dependencies with evidence.
 - **Project Memory** — preserve decisions, conventions, and important historical context.
 - **Pull Request Intelligence** — explain proposed changes and likely impact.
@@ -58,7 +58,7 @@ pip install -e ".[dev]"
 uvicorn gitwise_api.main:app --reload
 ```
 
-The API will be available at http://127.0.0.1:8000 and its OpenAPI docs at http://127.0.0.1:8000/docs.
+The API will be available at http://127.0.0.1:8000 and its OpenAPI docs at http://127.0.0.1:8000/docs. Use `POST /repositories/inspect` with `{"url":"https://github.com/owner/repository"}` to create a read-only Software Genome snapshot.
 
 ## Configuration
 
