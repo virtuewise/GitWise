@@ -217,3 +217,46 @@ def test_rejects_unknown_installation_repository_action() -> None:
             )
 
     asyncio.run(exercise())
+
+def test_rejects_repository_identity_mismatch_from_token_exchange() -> None:
+    class MismatchedGitHubApp(FakeGitHubApp):
+        async def create_repository_scoped_token(
+            self,
+            installation_id: int,
+            *,
+            repository_id: int,
+            owner: str,
+            repository_name: str,
+        ) -> GitHubInstallationToken:
+            return GitHubInstallationToken(
+                token="ephemeral-test-token",
+                expires_at="2026-11-17T00:00:00Z",
+                permissions={"contents": "read"},
+                repositories=(
+                    {
+                        "id": repository_id + 1,
+                        "full_name": f"{owner}/{repository_name}",
+                        "private": True,
+                    },
+                ),
+            )
+
+    async def exercise() -> None:
+        with pytest.raises(
+            GitHubInstallationEventError, match="repository identity"
+        ):
+            await process_installation_event(
+                event_name="installation_repositories",
+                payload={
+                    "action": "added",
+                    "installation": {"id": 456, "app_id": 123},
+                    "repositories_added": [
+                        {"id": 9001, "full_name": "acme/api"}
+                    ],
+                },
+                app_id=123,
+                app=MismatchedGitHubApp(),
+                grants=FakeGrantStore(),
+            )
+
+    asyncio.run(exercise())
