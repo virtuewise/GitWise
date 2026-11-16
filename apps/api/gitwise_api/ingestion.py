@@ -10,7 +10,10 @@ import httpx
 from fastapi import HTTPException, status
 
 from gitwise_api.architecture import extract_python_imports, module_name_for_path
+from gitwise_api.architecture import extract_python_imports, module_name_for_path
 from gitwise_api.genome import (
+    ArchitectureEdge,
+    ArchitectureNode,
     GenomeFact,
     RepositoryTreeEntry,
     SoftwareGenomeSnapshot,
@@ -480,5 +483,7 @@ class GitHubRepositoryClient:
             truncated=bool(tree_payload.get("truncated")) or len(raw_tree) > MAX_TREE_ENTRIES,
             files_analyzed=sum(entry.kind == "blob" for entry in entries),
             tree=entries,
+            architecture_nodes=architecture_nodes,
+            architecture_edges=architecture_edges,
             facts=facts,
         )
