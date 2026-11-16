@@ -92,7 +92,7 @@ class FakeGrantStore:
         return 2
 
 
-def test_added_and_removed_repositories_use_verified_ids_and_atomic_grants() -> None:
+def test_added_and_removed_events_reconcile_current_verified_ids() -> None:
     async def exercise() -> None:
         app = FakeGitHubApp()
         grants = FakeGrantStore()
