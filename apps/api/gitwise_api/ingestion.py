@@ -9,7 +9,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import HTTPException, status
 
-from gitwise_api.architecture import extract_python_imports, module_name_for_path
+from gitwise_api.architecture import module_name_for_path, parse_python_imports
 from gitwise_api.genome import (
     ArchitectureAnalysis,
     ArchitectureEdge,
@@ -445,11 +445,15 @@ class GitHubRepositoryClient:
                 architecture_limitations.add("max_total_python_bytes")
                 break
             total_python_bytes += len(raw_content)
-            python_files_analyzed += 1
             source_module = module_by_path[entry.path]
             if source_module is None:
                 continue
-            for imported in extract_python_imports(source, source_module, entry.path):
+            imports = parse_python_imports(source, source_module, entry.path)
+            if imports is None:
+                architecture_limitations.add("invalid_python_syntax")
+                continue
+            python_files_analyzed += 1
+            for imported in imports:
                 candidates = [
                     imported.target_module,
                     *(
