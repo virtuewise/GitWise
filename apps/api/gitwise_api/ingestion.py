@@ -570,6 +570,13 @@ class GitHubRepositoryClient:
         return SoftwareGenomeSnapshot(
             repository=repository.full_name,
             repository_url=repository.canonical_url,
+            provider_repository_id=(
+                metadata.get("id")
+                if isinstance(metadata.get("id"), int)
+                and not isinstance(metadata.get("id"), bool)
+                and metadata["id"] > 0
+                else None
+            ),
             description=description,
             default_branch=default_branch,
             requested_ref=ref or default_branch,
