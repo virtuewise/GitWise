@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from gitwise_api.github_app import GitHubAppInstallation
 
@@ -24,6 +24,15 @@ class InstallationGrantStore:
 
     def __init__(self, engine: AsyncEngine) -> None:
         self._engine = engine
+
+    @classmethod
+    def from_url(cls, database_url: str) -> InstallationGrantStore:
+        if not database_url.startswith("postgresql+asyncpg://"):
+            raise ValueError("GITWISE_DATABASE_URL must use postgresql+asyncpg.")
+        return cls(create_async_engine(database_url, pool_pre_ping=True))
+
+    async def close(self) -> None:
+        await self._engine.dispose()
 
     async def grant_repositories(
         self,
