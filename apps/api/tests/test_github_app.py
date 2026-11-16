@@ -147,11 +147,13 @@ def test_rejects_invalid_installation_token_repository_scope() -> None:
                 private_key=private_pem,
                 client=http_client,
             )
-            with pytest.raises(ValueError, match="Repository scope"):
+            with pytest.raises(ValueError, match="repository scope"):
                 await app.create_installation_token(
                     456,
                     repositories=("../unsafe",),
                 )
+            with pytest.raises(ValueError, match="repository scope"):
+                await app.create_installation_token(456, repositories=())
 
     asyncio.run(exercise())
 
