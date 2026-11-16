@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from gitwise_api.genome import SoftwareGenomeSnapshot
+from gitwise_api.genome import GenomeFact, SoftwareGenomeSnapshot
 from gitwise_api.storage import (
     GenomeSnapshotStore,
     SnapshotAccessDenied,
@@ -80,7 +80,15 @@ def test_postgresql_snapshot_authorization_idempotency_conflict_and_immutability
             assert second.outcome == "already_exists"
             assert first.snapshot_key == second.snapshot_key
 
-            changed = snapshot.model_copy(update={"description": "different immutable content"})
+            changed = snapshot.model_copy(deep=True)
+            changed.facts.append(GenomeFact.observed(
+                repository=repository,
+                commit_sha=commit_sha,
+                fact_type="project.configuration",
+                value={"setting": "changed"},
+                source_path="pyproject.toml",
+                extraction_method="integration_test",
+            ))
             with pytest.raises(SnapshotContentConflict):
                 await store.store_snapshot(
                     changed, principal_type="github_user", principal_id=principal_id
