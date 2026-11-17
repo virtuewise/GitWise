@@ -464,28 +464,103 @@ class SessionStore:
             return None
         return IssuedSession(new_session_token, new_csrf_token, row[0])
 
-    async def revoke_session(self, session_token: str) -> bool:
-        """Log out one session."""
+    async def revoke_session(self, session_token: str, oauth) -> bool:
+        """Revoke one local session, then best-effort revoke its GitHub token."""
         if not _plausible_token(session_token):
             return False
+        access_token: str | None = None
         async with self._engine.begin() as connection:
-            result = await connection.execute(
+            row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT encrypted_access_token
+                        FROM user_sessions
+                        WHERE token_hash = :token_hash AND revoked_at IS NULL
+                        FOR UPDATE
+                        """
+                    ),
+                    {"token_hash": _digest(session_token)},
+                )
+            ).first()
+            if row is None:
+                return False
+            try:
+                access_token = self._cipher.decrypt(row[0])
+            except TokenCryptoError:
+                access_token = None
+            await connection.execute(
                 text(
-                    "UPDATE user_sessions SET revoked_at = now() "
-                    "WHERE token_hash = :token_hash AND revoked_at IS NULL"
+                    """
+                    UPDATE user_sessions
+                    SET revoked_at = clock_timestamp(),
+                        encrypted_access_token = :revoked_access,
+                        encrypted_refresh_token = NULL,
+                        access_token_expires_at = NULL,
+                        refresh_token_expires_at = NULL
+                    WHERE token_hash = :token_hash AND revoked_at IS NULL
+                    """
                 ),
-                {"token_hash": _digest(session_token)},
+                {
+                    "token_hash": _digest(session_token),
+                    "revoked_access": self._cipher.encrypt("revoked-session"),
+                },
             )
-        return result.rowcount == 1
+        # Do not hold a database connection/row lock across the provider request.
+        # Local revocation is authoritative even if GitHub is temporarily unavailable.
+        if access_token:
+            try:
+                await oauth.revoke_access_token(access_token=access_token)
+            except GitHubOAuthError:
+                pass
+        return True
 
-    async def revoke_user_sessions(self, github_user_id: int) -> int:
-        """Invalidate every active session for one verified GitHub user."""
+    async def revoke_user_sessions(self, github_user_id: int, oauth) -> int:
+        """Revoke all local sessions and the user's GitHub App authorization."""
+        access_tokens: list[str] = []
         async with self._engine.begin() as connection:
+            rows = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT encrypted_access_token
+                        FROM user_sessions
+                        WHERE github_user_id = :user_id AND revoked_at IS NULL
+                        ORDER BY session_id
+                        FOR UPDATE
+                        """
+                    ),
+                    {"user_id": github_user_id},
+                )
+            ).all()
+            for row in rows:
+                try:
+                    access_tokens.append(self._cipher.decrypt(row[0]))
+                except TokenCryptoError:
+                    continue
             result = await connection.execute(
                 text(
-                    "UPDATE user_sessions SET revoked_at = now() "
-                    "WHERE github_user_id = :user_id AND revoked_at IS NULL"
+                    """
+                    UPDATE user_sessions
+                    SET revoked_at = clock_timestamp(),
+                        encrypted_access_token = :revoked_access,
+                        encrypted_refresh_token = NULL,
+                        access_token_expires_at = NULL,
+                        refresh_token_expires_at = NULL
+                    WHERE github_user_id = :user_id AND revoked_at IS NULL
+                    """
                 ),
-                {"user_id": github_user_id},
+                {
+                    "user_id": github_user_id,
+                    "revoked_access": self._cipher.encrypt("revoked-session"),
+                },
             )
+        # A grant revocation invalidates every access/refresh token for this app
+        # and user. One surviving access token is sufficient for the API call.
+        if access_tokens:
+            try:
+                await oauth.revoke_authorization(access_token=access_tokens[0])
+            except GitHubOAuthError:
+                pass
         return result.rowcount
+
