@@ -517,16 +517,17 @@ def test_provider_refresh_failure_never_returns_the_expired_access_token() -> No
                     await connection.execute(
                         text(
                             "SELECT revoked_at IS NOT NULL "
-                            "AND encrypted_access_token IS NULL "
                             "AND encrypted_refresh_token IS NULL "
                             "AND access_token_expires_at IS NULL "
-                            "AND refresh_token_expires_at IS NULL "
+                            "AND refresh_token_expires_at IS NULL, "
+                            "encrypted_access_token "
                             "FROM user_sessions WHERE session_id = :s"
                         ),
                         {"s": session.session_id},
                     )
                 ).scalar_one()
-            assert revoked is True
+            assert revoked[0] is True
+            assert store._cipher.decrypt(revoked[1]) == "revoked-session"
         finally:
             await store.close()
 
