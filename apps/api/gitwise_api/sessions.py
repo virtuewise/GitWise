@@ -280,7 +280,6 @@ class SessionStore:
         material before the failure is returned to the caller.
         """
         refresh_failed = False
-        revoke_after_refresh_failure = False
         refreshed_access_token: str | None = None
         try:
             async with self._engine.begin() as connection:
@@ -334,7 +333,6 @@ class SessionStore:
                     # A read/write failure or provider rejection can happen after
                     # GitHub has consumed the one-time refresh token. Revoke the
                     # local session so callers cannot repeatedly replay a dead pair.
-                    revoke_after_refresh_failure = True
                     await connection.execute(
                         text(
                             """
