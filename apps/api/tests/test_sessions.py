@@ -674,7 +674,7 @@ def test_logout_all_never_sends_sanitized_sentinels_to_github() -> None:
                 )
                 assert await store.revoke_session(issued.session_token, revoker) is True
 
-            live = await store.create_session(
+            await store.create_session(
                 github_user_id=user_id,
                 github_login="sentinel-test",
                 access_token="ghu_current_access",
