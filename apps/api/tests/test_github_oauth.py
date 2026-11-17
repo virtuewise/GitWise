@@ -80,6 +80,7 @@ def test_exchange_sends_secret_and_verifier_in_the_body_and_parses_tokens() -> N
                     "access_token": "ghu_x",
                     "refresh_token": "ghr_y",
                     "expires_in": 28800,
+                    "refresh_token_expires_in": 15897600,
                     "token_type": "Bearer",
                 },
             )
@@ -89,6 +90,7 @@ def test_exchange_sends_secret_and_verifier_in_the_body_and_parses_tokens() -> N
             "ghu_x",
             "ghr_y",
             28800,
+            15897600,
         )
         assert seen["code_verifier"] == "ver"
         assert seen["client_secret"] == "shh"
