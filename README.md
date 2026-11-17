@@ -72,6 +72,27 @@ Configure `GITWISE_GITHUB_WEBHOOK_SECRET` with the webhook secret from the GitHu
 
 GitHub App user access and refresh tokens are encrypted at rest and never returned to browser clients. Refresh exchanges are serialized per session and rotate the encrypted token pair atomically. Logout commits local revocation and clears refresh credentials before attempting upstream revocation: a single-session logout revokes its user access token, while logout-all revokes the user's GitHub App authorization. Upstream revocation is best-effort; local session revocation remains authoritative if GitHub is unavailable. Migration `0007_sanitize_revoked_sessions` also erases recoverable token material left in rows revoked by the earlier logout behavior. PostgreSQL integration tests verify token cleanup, logout-all isolation between users, and fail-closed behavior when provider revocation fails. Authenticated Genome history remains gated on independent review and the remaining authorization/security acceptance criteria.
 
+## OAuth session retention
+
+Terminal session rows are retained for 30 days after local revocation or, for sessions
+that expire naturally, after the first idle/absolute expiry that makes the session unusable.
+This preserves a short operational/audit window without retaining session metadata
+indefinitely. Credential ciphertext is sanitized at revocation; the retention window
+does not extend credential validity or permit session reuse.
+
+Run `python -m gitwise_api.session_maintenance` once daily from the deployment's
+scheduler (for example, a Kubernetes CronJob or systemd timer). The command requires
+`GITWISE_DATABASE_URL` and `GITWISE_TOKEN_ENCRYPTION_KEYS`, deletes at most 500 rows
+per transaction, and loops until the eligible backlog is drained. It uses
+`FOR UPDATE SKIP LOCKED`, so concurrent maintenance workers do not claim the same
+rows and active refresh/logout operations are not blocked by rows they hold. The
+command emits only an aggregate deleted-row count; alert on non-zero exit status,
+and monitor the count/backlog over time. It is safe to rerun after partial failure.
+
+Migration `0008_session_retention_indexes` adds partial indexes for revoked and
+naturally expired sessions. The purge never deletes a session before the 30-day
+terminal-retention window, and never selects a currently active session.
+
 ## GitHub App identity foundation
 
 The GitHub App client authenticates with short-lived RS256 App JWTs, verifies that an installation belongs to the configured App, and can mint a token scoped to one repository. Before returning that token, it checks the installation account, the repository's immutable numeric ID and full name from GitHub's token response, and the explicit contents: read permission. A repository name supplied by an event is never treated as sufficient identity. The lifecycle processor in `github_installation_events.py` verifies signed event identity against the configured App, then confirms added repositories with GitHub before granting access. Deleted/suspended installations have their active grants revoked. Grant reconciliation is transactional and idempotent; delivery completion follows the committed database effects.
