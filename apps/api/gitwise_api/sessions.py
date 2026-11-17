@@ -331,6 +331,26 @@ class SessionStore:
                 ):
                     raise SessionError("GitHub authorization must be renewed.")
 
+                # The transaction may have held the row lock during a slow provider
+                # request. PostgreSQL now() is fixed at transaction start, so recheck
+                # the session against the wall clock before releasing a token.
+                session_live = (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT revoked_at IS NULL
+                               AND idle_expires_at > clock_timestamp()
+                               AND absolute_expires_at > clock_timestamp()
+                            FROM user_sessions
+                            WHERE session_id = :session_id
+                            """
+                        ),
+                        {"session_id": session.session_id},
+                    )
+                ).scalar_one()
+                if not session_live:
+                    raise SessionError("Session is no longer valid.")
+
                 await connection.execute(
                     text(
                         """
