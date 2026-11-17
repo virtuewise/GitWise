@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import os
+from datetime import timedelta
 
 import pytest
 from cryptography.fernet import Fernet
@@ -534,8 +535,8 @@ def test_session_expiring_during_refresh_fails_closed() -> None:
                 )
 
         store = _store(
-            idle_ttl=__import__("datetime").timedelta(seconds=1),
-            absolute_ttl=__import__("datetime").timedelta(seconds=5),
+            idle_ttl=timedelta(seconds=1),
+            absolute_ttl=timedelta(seconds=5),
         )
         try:
             issued = await store.create_session(
