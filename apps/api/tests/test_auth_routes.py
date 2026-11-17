@@ -43,6 +43,7 @@ class FakeGitHub:
         self.exchange_error = False
         self.revoked_tokens: list[str] = []
         self.revoked_grants: list[str] = []
+        self.revocation_error = False
 
     def oauth_handler(self, request: httpx.Request) -> httpx.Response:
         if request.method == "DELETE":
@@ -51,7 +52,7 @@ class FakeGitHub:
                 self.revoked_grants.append(token)
             else:
                 self.revoked_tokens.append(token)
-            return httpx.Response(204)
+            return httpx.Response(422 if self.revocation_error else 204)
         form = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
         self.verifiers.append(form["code_verifier"])
         if self.exchange_error or form["code"] not in USERS:
@@ -439,5 +440,27 @@ def test_sign_in_routes_report_unconfigured_instead_of_guessing() -> None:
         async with _browser() as browser:
             assert (await browser.get("/auth/github/login")).status_code == 503
             assert (await browser.get("/auth/session")).status_code == 503
+
+    asyncio.run(exercise())
+
+
+def test_logout_remains_locally_effective_when_github_revocation_fails() -> None:
+    async def exercise() -> None:
+        github = FakeGitHub()
+        github.revocation_error = True
+        store = _install(github)
+        try:
+            async with _browser() as browser:
+                await _sign_in(browser, "code-alice")
+                response = await browser.post(
+                    "/auth/logout",
+                    headers={"x-csrf-token": browser.cookies[CSRF_COOKIE]},
+                )
+                assert response.status_code == 204
+                assert (await browser.get("/auth/session")).status_code == 401
+                assert github.revoked_tokens == ["ghu_alice_token"]
+        finally:
+            await store.close()
+            main.app.state.auth_components = None
 
     asyncio.run(exercise())
