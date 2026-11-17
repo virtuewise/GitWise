@@ -542,9 +542,13 @@ class SessionStore:
                 if row[1] is None:
                     newly_revoked += 1
                 try:
-                    access_tokens.append(self._cipher.decrypt(row[0]))
+                    access_token = self._cipher.decrypt(row[0])
                 except TokenCryptoError:
                     continue
+                # Revoked rows are sanitized with this non-credential sentinel.
+                # Never send it to GitHub as an OAuth bearer token.
+                if access_token != "revoked-session":
+                    access_tokens.append(access_token)
             await connection.execute(
                 text(
                     """
