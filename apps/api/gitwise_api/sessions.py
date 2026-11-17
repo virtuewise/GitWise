@@ -529,7 +529,7 @@ class SessionStore:
                         """
                         SELECT encrypted_access_token
                         FROM user_sessions
-                        WHERE github_user_id = :user_id AND revoked_at IS NULL
+                        WHERE github_user_id = :user_id
                         ORDER BY session_id
                         FOR UPDATE
                         """
@@ -546,12 +546,12 @@ class SessionStore:
                 text(
                     """
                     UPDATE user_sessions
-                    SET revoked_at = clock_timestamp(),
+                    SET revoked_at = COALESCE(revoked_at, clock_timestamp()),
                         encrypted_access_token = :revoked_access,
                         encrypted_refresh_token = NULL,
                         access_token_expires_at = NULL,
                         refresh_token_expires_at = NULL
-                    WHERE github_user_id = :user_id AND revoked_at IS NULL
+                    WHERE github_user_id = :user_id
                     """
                 ),
                 {
