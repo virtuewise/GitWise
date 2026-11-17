@@ -522,12 +522,13 @@ class SessionStore:
     ) -> int:
         """Revoke all local sessions and the user's GitHub App authorization."""
         access_tokens: list[str] = []
+        newly_revoked = 0
         async with self._engine.begin() as connection:
             rows = (
                 await connection.execute(
                     text(
                         """
-                        SELECT encrypted_access_token
+                        SELECT encrypted_access_token, revoked_at
                         FROM user_sessions
                         WHERE github_user_id = :user_id
                         ORDER BY session_id
@@ -538,6 +539,8 @@ class SessionStore:
                 )
             ).all()
             for row in rows:
+                if row[1] is None:
+                    newly_revoked += 1
                 try:
                     access_tokens.append(self._cipher.decrypt(row[0]))
                 except TokenCryptoError:
@@ -569,5 +572,5 @@ class SessionStore:
                 # The first session's access token may already have expired; try
                 # another still-active session before giving up best-effort cleanup.
                 continue
-        return result.rowcount
+        return newly_revoked
 
