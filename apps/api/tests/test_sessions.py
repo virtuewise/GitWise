@@ -107,7 +107,6 @@ def test_session_lifecycle_and_tokens_are_encrypted_at_rest() -> None:
                 access_token=ACCESS,
                 access_token_expires_in=28800,
                 refresh_token=REFRESH,
-                access_token_expires_in=28800,
                 refresh_token_expires_in=15897600,
             )
             session = await store.resolve_session(issued.session_token)
