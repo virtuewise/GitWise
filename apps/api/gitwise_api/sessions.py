@@ -338,7 +338,7 @@ class SessionStore:
                             """
                             UPDATE user_sessions
                             SET revoked_at = clock_timestamp(),
-                                encrypted_access_token = NULL,
+                                encrypted_access_token = :revoked_access,
                                 encrypted_refresh_token = NULL,
                                 access_token_expires_at = NULL,
                                 refresh_token_expires_at = NULL
@@ -346,7 +346,10 @@ class SessionStore:
                               AND revoked_at IS NULL
                             """
                         ),
-                        {"session_id": session.session_id},
+                        {
+                                "session_id": session.session_id,
+                                "revoked_access": self._cipher.encrypt("revoked-session"),
+                            },
                     )
                     refresh_failed = True
 
@@ -361,7 +364,7 @@ class SessionStore:
                                 """
                                 UPDATE user_sessions
                                 SET revoked_at = clock_timestamp(),
-                                    encrypted_access_token = NULL,
+                                    encrypted_access_token = :revoked_access,
                                     encrypted_refresh_token = NULL,
                                     access_token_expires_at = NULL,
                                     refresh_token_expires_at = NULL
@@ -369,7 +372,10 @@ class SessionStore:
                                   AND revoked_at IS NULL
                                 """
                             ),
-                            {"session_id": session.session_id},
+                            {
+                                "session_id": session.session_id,
+                                "revoked_access": self._cipher.encrypt("revoked-session"),
+                            },
                         )
                         refresh_failed = True
                     else:
