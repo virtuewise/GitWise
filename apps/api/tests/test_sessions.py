@@ -105,6 +105,7 @@ def test_session_lifecycle_and_tokens_are_encrypted_at_rest() -> None:
                 github_user_id=user_id,
                 github_login="maintainer",
                 access_token=ACCESS,
+                access_token_expires_in=28800,
                 refresh_token=REFRESH,
                 access_token_expires_in=28800,
                 refresh_token_expires_in=15897600,
@@ -231,7 +232,10 @@ def test_rotation_invalidates_previous_tokens_immediately() -> None:
         store = _store()
         try:
             issued = await store.create_session(
-                github_user_id=_user_id(), github_login="rotator", access_token=ACCESS
+                github_user_id=_user_id(),
+                github_login="rotator",
+                access_token=ACCESS,
+                access_token_expires_in=28800,
             )
             rotated = await store.rotate_session(issued.session_token)
             assert rotated is not None
@@ -449,6 +453,64 @@ def test_revoked_session_cannot_refresh() -> None:
                 )
             with pytest.raises(SessionError):
                 await store.access_token(session, NeverCalled())
+        finally:
+            await store.close()
+
+    asyncio.run(exercise())
+
+
+def test_unknown_access_token_expiry_fails_closed() -> None:
+    async def exercise() -> None:
+        from gitwise_api.sessions import SessionError
+
+        store = _store()
+        try:
+            issued = await store.create_session(
+                github_user_id=_user_id(),
+                github_login="unknown-expiry",
+                access_token=ACCESS,
+            )
+            session = await store.resolve_session(issued.session_token)
+            assert session is not None
+            with pytest.raises(SessionError):
+                await store.access_token(session)
+        finally:
+            await store.close()
+
+    asyncio.run(exercise())
+
+
+def test_provider_refresh_failure_never_returns_the_expired_access_token() -> None:
+    async def exercise() -> None:
+        from gitwise_api.github_oauth import GitHubOAuthError
+        from gitwise_api.sessions import SessionError
+
+        class FailedRefresh:
+            async def refresh_access_token(self, *, refresh_token: str):
+                raise GitHubOAuthError("GitHub authorization could not be refreshed.")
+
+        store = _store()
+        try:
+            issued = await store.create_session(
+                github_user_id=_user_id(),
+                github_login="provider-failure",
+                access_token=ACCESS,
+                refresh_token=REFRESH,
+                access_token_expires_in=28800,
+                refresh_token_expires_in=15897600,
+            )
+            session = await store.resolve_session(issued.session_token)
+            assert session is not None
+            async with store._engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE user_sessions SET access_token_expires_at = "
+                        "now() - interval '1 second' WHERE session_id = :s"
+                    ),
+                    {"s": session.session_id},
+                )
+            with pytest.raises(SessionError):
+                await store.access_token(session, FailedRefresh())
         finally:
             await store.close()
 
