@@ -99,6 +99,44 @@ class SessionStore:
     async def close(self) -> None:
         await self._engine.dispose()
 
+    async def purge_terminal_sessions(self, *, batch_size: int = 500) -> int:
+        """Delete terminal session rows after the 30-day metadata retention window.
+
+        A session is terminal at revocation or at the first of its idle/absolute
+        expiries. Candidates are locked in bounded batches with SKIP LOCKED so
+        concurrent refresh, logout, and maintenance workers serialize safely.
+        Active sessions can never match the candidate predicate.
+        """
+        if type(batch_size) is not int or not 1 <= batch_size <= 5000:
+            raise ValueError("Session purge batch_size must be between 1 and 5000.")
+        async with self._engine.begin() as connection:
+            result = await connection.execute(
+                text(
+                    """
+                    WITH candidates AS (
+                        SELECT session_id
+                        FROM user_sessions
+                        WHERE COALESCE(
+                            revoked_at,
+                            LEAST(idle_expires_at, absolute_expires_at)
+                        ) < clock_timestamp() - interval '30 days'
+                        ORDER BY COALESCE(
+                            revoked_at,
+                            LEAST(idle_expires_at, absolute_expires_at)
+                        ), session_id
+                        LIMIT :batch_size
+                        FOR UPDATE SKIP LOCKED
+                    )
+                    DELETE FROM user_sessions AS sessions
+                    USING candidates
+                    WHERE sessions.session_id = candidates.session_id
+                    RETURNING sessions.session_id
+                    """
+                ),
+                {"batch_size": batch_size},
+            )
+            return len(result.fetchall())
+
     # OAuth state -----------------------------------------------------------
 
     async def begin_authorization(self) -> AuthorizationStart:
