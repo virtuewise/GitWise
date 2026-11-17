@@ -382,6 +382,9 @@ def test_signing_out_everywhere_only_ends_that_users_sessions() -> None:
                 await _sign_in(alice, "code-alice")
                 await _sign_in(alice_phone, "code-alice")
                 await _sign_in(bob, "code-bob")
+                alice_session = await store.resolve_session(alice.cookies[SESSION_COOKIE])
+                phone_session = await store.resolve_session(alice_phone.cookies[SESSION_COOKIE])
+                assert alice_session is not None and phone_session is not None
 
                 assert (await bob.get("/auth/session")).json()["login"] == "bob"
                 response = await alice.post(
@@ -398,8 +401,12 @@ def test_signing_out_everywhere_only_ends_that_users_sessions() -> None:
                                 "AND encrypted_refresh_token IS NULL "
                                 "AND access_token_expires_at IS NULL "
                                 "AND refresh_token_expires_at IS NULL) "
-                                "FROM user_sessions WHERE github_user_id = 1001"
-                            )
+                                "FROM user_sessions WHERE session_id IN (:first, :second)"
+                            ),
+                            {
+                                "first": alice_session.session_id,
+                                "second": phone_session.session_id,
+                            },
                         )
                     ).one()
                 assert cleared[0] == 2
