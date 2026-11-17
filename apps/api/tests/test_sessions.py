@@ -525,7 +525,7 @@ def test_provider_refresh_failure_never_returns_the_expired_access_token() -> No
                         ),
                         {"s": session.session_id},
                     )
-                ).scalar_one()
+                ).one()
             assert revoked[0] is True
             assert store._cipher.decrypt(revoked[1]) == "revoked-session"
         finally:
