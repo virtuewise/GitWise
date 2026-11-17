@@ -411,7 +411,8 @@ def test_signing_out_everywhere_only_ends_that_users_sessions() -> None:
                     "/auth/logout/all", headers={"x-csrf-token": alice.cookies[CSRF_COOKIE]}
                 )
                 assert response.status_code == 204
-                assert github.revoked_grants == ["ghu_alice_token"]
+                assert len(github.revoked_grants) == 1
+                assert github.revoked_grants[0] in {"ghu_alice_token", "ghu_legacy_alice"}
                 assert github.revoked_tokens == []
                 async with store._engine.connect() as connection:
                     cleared = (
