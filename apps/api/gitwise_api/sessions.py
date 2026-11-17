@@ -347,9 +347,9 @@ class SessionStore:
                             """
                         ),
                         {
-                                "session_id": session.session_id,
-                                "revoked_access": self._cipher.encrypt("revoked-session"),
-                            },
+                            "session_id": session.session_id,
+                            "revoked_access": self._cipher.encrypt("revoked-session"),
+                        },
                     )
                     refresh_failed = True
 
