@@ -643,3 +643,116 @@ def test_connect_failure_keeps_refresh_credentials_retryable() -> None:
             await store.close()
 
     asyncio.run(exercise())
+
+
+def test_terminal_session_purge_is_bounded_and_respects_retention_window() -> None:
+    async def exercise() -> None:
+        store = _store()
+        try:
+            revoked_old = await store.create_session(
+                github_user_id=_user_id(), github_login="revoked-old", access_token=ACCESS
+            )
+            expired_old = await store.create_session(
+                github_user_id=_user_id(), github_login="expired-old", access_token=ACCESS
+            )
+            revoked_recent = await store.create_session(
+                github_user_id=_user_id(), github_login="revoked-recent", access_token=ACCESS
+            )
+            active = await store.create_session(
+                github_user_id=_user_id(), github_login="still-active", access_token=ACCESS
+            )
+            async with store._engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE user_sessions SET revoked_at = now() - interval '31 days' "
+                        "WHERE token_hash = :token_hash"
+                    ),
+                    {"token_hash": hashlib.sha256(revoked_old.session_token.encode()).digest()},
+                )
+                await connection.execute(
+                    text(
+                        "UPDATE user_sessions SET idle_expires_at = now() - interval '31 days', "
+                        "absolute_expires_at = now() - interval '31 days' "
+                        "WHERE token_hash = :token_hash"
+                    ),
+                    {"token_hash": hashlib.sha256(expired_old.session_token.encode()).digest()},
+                )
+                await connection.execute(
+                    text(
+                        "UPDATE user_sessions SET revoked_at = now() - interval '29 days' "
+                        "WHERE token_hash = :token_hash"
+                    ),
+                    {"token_hash": hashlib.sha256(revoked_recent.session_token.encode()).digest()},
+                )
+
+            with pytest.raises(ValueError):
+                await store.purge_terminal_sessions(batch_size=0)
+            with pytest.raises(ValueError):
+                await store.purge_terminal_sessions(batch_size=5001)
+
+            assert await store.purge_terminal_sessions(batch_size=1) == 1
+            assert await store.purge_terminal_sessions(batch_size=1) == 1
+            assert await store.purge_terminal_sessions(batch_size=1) == 0
+
+            async with store._engine.connect() as connection:
+                remaining = (
+                    await connection.execute(
+                        text(
+                            "SELECT count(*) FROM user_sessions "
+                            "WHERE token_hash IN (:recent, :active)"
+                        ),
+                        {
+                            "recent": hashlib.sha256(revoked_recent.session_token.encode()).digest(),
+                            "active": hashlib.sha256(active.session_token.encode()).digest(),
+                        },
+                    )
+                ).scalar_one()
+                removed = (
+                    await connection.execute(
+                        text(
+                            "SELECT count(*) FROM user_sessions "
+                            "WHERE token_hash IN (:revoked, :expired)"
+                        ),
+                        {
+                            "revoked": hashlib.sha256(revoked_old.session_token.encode()).digest(),
+                            "expired": hashlib.sha256(expired_old.session_token.encode()).digest(),
+                        },
+                    )
+                ).scalar_one()
+            assert remaining == 2
+            assert removed == 0
+        finally:
+            await store.close()
+
+    asyncio.run(exercise())
+
+
+def test_terminal_session_purge_skips_rows_locked_by_live_requests() -> None:
+    async def exercise() -> None:
+        store = _store()
+        try:
+            issued = await store.create_session(
+                github_user_id=_user_id(), github_login="locked-terminal", access_token=ACCESS
+            )
+            async with store._engine.begin() as locker:
+                await locker.execute(
+                    text(
+                        "UPDATE user_sessions SET revoked_at = now() - interval '31 days' "
+                        "WHERE token_hash = :token_hash"
+                    ),
+                    {"token_hash": hashlib.sha256(issued.session_token.encode()).digest()},
+                )
+                await locker.execute(
+                    text(
+                        "SELECT session_id FROM user_sessions "
+                        "WHERE token_hash = :token_hash FOR UPDATE"
+                    ),
+                    {"token_hash": hashlib.sha256(issued.session_token.encode()).digest()},
+                )
+                # A separate pooled connection must not wait on this row.
+                assert await store.purge_terminal_sessions(batch_size=10) == 0
+            assert await store.purge_terminal_sessions(batch_size=10) == 1
+        finally:
+            await store.close()
+
+    asyncio.run(exercise())
