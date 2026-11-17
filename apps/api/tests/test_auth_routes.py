@@ -385,6 +385,26 @@ def test_signing_out_everywhere_only_ends_that_users_sessions() -> None:
                 alice_session = await store.resolve_session(alice.cookies[SESSION_COOKIE])
                 phone_session = await store.resolve_session(alice_phone.cookies[SESSION_COOKIE])
                 assert alice_session is not None and phone_session is not None
+                legacy_issued = await store.create_session(
+                    github_user_id=1001,
+                    github_login="alice",
+                    access_token="ghu_legacy_alice",
+                    refresh_token="ghr_legacy_alice",
+                    access_token_expires_in=28800,
+                    refresh_token_expires_in=15897600,
+                )
+                legacy_session = await store.resolve_session(legacy_issued.session_token)
+                assert legacy_session is not None
+                # Simulate rows created by the old logout handler: revoked_at set,
+                # but encrypted provider credentials were left behind.
+                async with store._engine.begin() as connection:
+                    await connection.execute(
+                        text(
+                            "UPDATE user_sessions SET revoked_at = now() "
+                            "WHERE session_id = :sid"
+                        ),
+                        {"sid": legacy_session.session_id},
+                    )
 
                 assert (await bob.get("/auth/session")).json()["login"] == "bob"
                 response = await alice.post(
@@ -401,15 +421,16 @@ def test_signing_out_everywhere_only_ends_that_users_sessions() -> None:
                                 "AND encrypted_refresh_token IS NULL "
                                 "AND access_token_expires_at IS NULL "
                                 "AND refresh_token_expires_at IS NULL) "
-                                "FROM user_sessions WHERE session_id IN (:first, :second)"
+                                "FROM user_sessions WHERE session_id IN (:first, :second, :legacy)"
                             ),
                             {
                                 "first": alice_session.session_id,
                                 "second": phone_session.session_id,
+                                "legacy": legacy_session.session_id,
                             },
                         )
                     ).one()
-                assert cleared[0] == 2
+                assert cleared[0] == 3
                 assert cleared[1] is True
 
                 assert (await alice.get("/auth/session")).status_code == 401
