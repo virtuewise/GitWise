@@ -80,15 +80,22 @@ def test_exchange_sends_secret_and_verifier_in_the_body_and_parses_tokens() -> N
                     "access_token": "ghu_x",
                     "refresh_token": "ghr_y",
                     "expires_in": 28800,
+                    "refresh_token_expires_in": 15897600,
                     "token_type": "Bearer",
                 },
             )
 
         tokens = await _client(handler).exchange_code(code="abc", code_verifier="ver")
-        assert (tokens.access_token, tokens.refresh_token, tokens.expires_in) == (
+        assert (
+            tokens.access_token,
+            tokens.refresh_token,
+            tokens.expires_in,
+            tokens.refresh_token_expires_in,
+        ) == (
             "ghu_x",
             "ghr_y",
             28800,
+            15897600,
         )
         assert seen["code_verifier"] == "ver"
         assert seen["client_secret"] == "shh"
@@ -104,5 +111,109 @@ def test_oversized_authorization_code_is_rejected_before_any_request() -> None:
 
         with pytest.raises(GitHubOAuthError):
             await _client(handler).exchange_code(code="x" * 600, code_verifier="v")
+
+    asyncio.run(exercise())
+
+
+
+def test_refresh_exchange_rotates_both_tokens_and_uses_refresh_grant() -> None:
+    async def exercise() -> None:
+        seen: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.update({k: v[0] for k, v in parse_qs(request.content.decode()).items()})
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "ghu_new",
+                    "refresh_token": "ghr_new",
+                    "expires_in": 28800,
+                    "refresh_token_expires_in": 15897600,
+                    "token_type": "bearer",
+                },
+            )
+
+        tokens = await _client(handler).refresh_access_token(refresh_token="ghr_old")
+        assert tokens.access_token == "ghu_new"
+        assert tokens.refresh_token == "ghr_new"
+        assert tokens.expires_in == 28800
+        assert tokens.refresh_token_expires_in == 15897600
+        assert seen["grant_type"] == "refresh_token"
+        assert seen["refresh_token"] == "ghr_old"
+        assert seen["client_id"] == "Iv1.abc"
+        assert seen["client_secret"] == "shh"
+        assert "ghu_new" not in repr(tokens)
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"error": "invalid_grant"},
+        {"access_token": "new", "refresh_token": "ghr_old", "expires_in": 28800,
+         "refresh_token_expires_in": 15897600, "token_type": "bearer"},
+        {"access_token": "new", "refresh_token": "rotated", "expires_in": True,
+         "refresh_token_expires_in": 15897600, "token_type": "bearer"},
+        {"access_token": "new", "refresh_token": "rotated", "expires_in": 28800,
+         "refresh_token_expires_in": 0, "token_type": "bearer"},
+    ],
+)
+def test_refresh_rejects_invalid_or_non_rotating_responses(payload: dict) -> None:
+    async def exercise() -> None:
+        client = _client(lambda request: httpx.Response(200, json=payload))
+        with pytest.raises(GitHubOAuthError):
+            await client.refresh_access_token(refresh_token="ghr_old")
+
+    asyncio.run(exercise())
+
+
+def test_revoke_access_token_uses_github_app_token_endpoint() -> None:
+    async def exercise() -> None:
+        seen: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["url"] = str(request.url)
+            seen["auth"] = request.headers.get("Authorization")
+            seen["payload"] = __import__("json").loads(request.content)
+            return httpx.Response(204)
+
+        await _client(handler).revoke_access_token(access_token="ghu_revoke_me")
+        assert seen["method"] == "DELETE"
+        assert seen["url"].endswith("/applications/Iv1.abc/token")
+        assert seen["auth"] == "Basic " + __import__("base64").b64encode(
+            b"Iv1.abc:shh"
+        ).decode()
+        assert seen["payload"] == {"access_token": "ghu_revoke_me"}
+
+    asyncio.run(exercise())
+
+
+def test_revoke_authorization_uses_grant_endpoint() -> None:
+    async def exercise() -> None:
+        seen: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["url"] = str(request.url)
+            seen["payload"] = __import__("json").loads(request.content)
+            return httpx.Response(204)
+
+        await _client(handler).revoke_authorization(access_token="ghu_grant_owner")
+        assert seen["url"].endswith("/applications/Iv1.abc/grant")
+        assert seen["payload"] == {"access_token": "ghu_grant_owner"}
+
+    asyncio.run(exercise())
+
+
+def test_revoke_failure_is_generic_and_does_not_leak_token_material() -> None:
+    async def exercise() -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(422, json={"message": "invalid token"})
+
+        with pytest.raises(GitHubOAuthError) as failure:
+            await _client(handler).revoke_access_token(access_token="ghu_secret")
+        assert "ghu_secret" not in str(failure.value)
+        assert "shh" not in str(failure.value)
 
     asyncio.run(exercise())

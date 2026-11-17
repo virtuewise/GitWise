@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import hashlib
+import json
 import os
 from urllib.parse import parse_qs, urlparse
 
@@ -18,6 +19,7 @@ from gitwise_api.github_oauth import GitHubOAuthClient
 from gitwise_api.github_user import GitHubUserClient
 from gitwise_api.sessions import SessionStore
 from gitwise_api.token_crypto import TokenCipher
+from sqlalchemy import text
 
 DATABASE_URL = os.getenv("GITWISE_DATABASE_URL")
 BASE = "https://app.gitwise.test"
@@ -39,8 +41,18 @@ class FakeGitHub:
     def __init__(self) -> None:
         self.verifiers: list[str] = []
         self.exchange_error = False
+        self.revoked_tokens: list[str] = []
+        self.revoked_grants: list[str] = []
+        self.revocation_error = False
 
     def oauth_handler(self, request: httpx.Request) -> httpx.Response:
+        if request.method == "DELETE":
+            token = json.loads(request.content.decode())["access_token"]
+            if request.url.path.endswith("/grant"):
+                self.revoked_grants.append(token)
+            else:
+                self.revoked_tokens.append(token)
+            return httpx.Response(422 if self.revocation_error else 204)
         form = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
         self.verifiers.append(form["code_verifier"])
         if self.exchange_error or form["code"] not in USERS:
@@ -52,6 +64,7 @@ class FakeGitHub:
                 "access_token": token,
                 "refresh_token": token.replace("ghu_", "ghr_"),
                 "expires_in": 28800,
+                "refresh_token_expires_in": 15897600,
                 "token_type": "bearer",
             },
         )
@@ -280,12 +293,15 @@ def test_failed_code_exchange_creates_no_session() -> None:
 
 def test_state_changing_requests_need_a_matching_csrf_token_and_logout_ends_the_session() -> None:
     async def exercise() -> None:
-        store = _install(FakeGitHub())
+        github = FakeGitHub()
+        store = _install(github)
         try:
             async with _browser() as browser:
                 callback, _ = await _sign_in(browser, "code-alice")
                 csrf = browser.cookies[CSRF_COOKIE]
                 old_session = browser.cookies[SESSION_COOKIE]
+                session_record = await store.resolve_session(old_session)
+                assert session_record is not None
 
                 assert (await browser.post("/auth/logout")).status_code == 403
                 wrong = await browser.post("/auth/logout", headers={"x-csrf-token": "nope"})
@@ -294,6 +310,23 @@ def test_state_changing_requests_need_a_matching_csrf_token_and_logout_ends_the_
 
                 done = await browser.post("/auth/logout", headers={"x-csrf-token": csrf})
                 assert done.status_code == 204
+                assert github.revoked_tokens == ["ghu_alice_token"]
+                assert github.revoked_grants == []
+                async with store._engine.connect() as connection:
+                    cleared = (
+                        await connection.execute(
+                            text(
+                                "SELECT revoked_at IS NOT NULL "
+                                "AND encrypted_refresh_token IS NULL "
+                                "AND access_token_expires_at IS NULL "
+                                "AND refresh_token_expires_at IS NULL, encrypted_access_token "
+                                "FROM user_sessions WHERE session_id = :sid"
+                            ),
+                            {"sid": session_record.session_id},
+                        )
+                    ).one()
+                assert cleared[0] is True
+                assert store._cipher.decrypt(cleared[1]) == "revoked-session"
                 assert (await browser.get("/auth/session")).status_code == 401
 
             # The old cookie is dead server-side, not merely deleted from the browser.
@@ -342,18 +375,69 @@ def test_rotation_replaces_cookies_and_kills_the_previous_session_token() -> Non
 
 def test_signing_out_everywhere_only_ends_that_users_sessions() -> None:
     async def exercise() -> None:
-        store = _install(FakeGitHub())
+        github = FakeGitHub()
+        store = _install(github)
         try:
             async with _browser() as alice, _browser() as alice_phone, _browser() as bob:
                 await _sign_in(alice, "code-alice")
                 await _sign_in(alice_phone, "code-alice")
                 await _sign_in(bob, "code-bob")
+                alice_session = await store.resolve_session(alice.cookies[SESSION_COOKIE])
+                phone_session = await store.resolve_session(alice_phone.cookies[SESSION_COOKIE])
+                assert alice_session is not None and phone_session is not None
+                legacy_issued = await store.create_session(
+                    github_user_id=1001,
+                    github_login="alice",
+                    access_token="ghu_legacy_alice",
+                    refresh_token="ghr_legacy_alice",
+                    access_token_expires_in=28800,
+                    refresh_token_expires_in=15897600,
+                )
+                legacy_session = await store.resolve_session(legacy_issued.session_token)
+                assert legacy_session is not None
+                # Simulate rows created by the old logout handler: revoked_at set,
+                # but encrypted provider credentials were left behind.
+                async with store._engine.begin() as connection:
+                    await connection.execute(
+                        text(
+                            "UPDATE user_sessions SET revoked_at = now() "
+                            "WHERE session_id = :sid"
+                        ),
+                        {"sid": legacy_session.session_id},
+                    )
 
                 assert (await bob.get("/auth/session")).json()["login"] == "bob"
                 response = await alice.post(
                     "/auth/logout/all", headers={"x-csrf-token": alice.cookies[CSRF_COOKIE]}
                 )
                 assert response.status_code == 204
+                assert len(github.revoked_grants) == 1
+                assert github.revoked_grants[0] in {"ghu_alice_token", "ghu_legacy_alice"}
+                assert github.revoked_tokens == []
+                async with store._engine.connect() as connection:
+                    cleared = (
+                        await connection.execute(
+                            text(
+                                "SELECT count(*), bool_and(revoked_at IS NOT NULL "
+                                "AND encrypted_refresh_token IS NULL "
+                                "AND access_token_expires_at IS NULL "
+                                "AND refresh_token_expires_at IS NULL), "
+                                "array_agg(encrypted_access_token) "
+                                "FROM user_sessions WHERE session_id IN (:first, :second, :legacy)"
+                            ),
+                            {
+                                "first": alice_session.session_id,
+                                "second": phone_session.session_id,
+                                "legacy": legacy_session.session_id,
+                            },
+                        )
+                    ).one()
+                assert cleared[0] == 3
+                assert cleared[1] is True
+                assert all(
+                    store._cipher.decrypt(token) == "revoked-session"
+                    for token in cleared[2]
+                )
 
                 assert (await alice.get("/auth/session")).status_code == 401
                 assert (await alice_phone.get("/auth/session")).status_code == 401
@@ -390,5 +474,27 @@ def test_sign_in_routes_report_unconfigured_instead_of_guessing() -> None:
         async with _browser() as browser:
             assert (await browser.get("/auth/github/login")).status_code == 503
             assert (await browser.get("/auth/session")).status_code == 503
+
+    asyncio.run(exercise())
+
+
+def test_logout_remains_locally_effective_when_github_revocation_fails() -> None:
+    async def exercise() -> None:
+        github = FakeGitHub()
+        github.revocation_error = True
+        store = _install(github)
+        try:
+            async with _browser() as browser:
+                await _sign_in(browser, "code-alice")
+                response = await browser.post(
+                    "/auth/logout",
+                    headers={"x-csrf-token": browser.cookies[CSRF_COOKIE]},
+                )
+                assert response.status_code == 204
+                assert (await browser.get("/auth/session")).status_code == 401
+                assert github.revoked_tokens == ["ghu_alice_token"]
+        finally:
+            await store.close()
+            main.app.state.auth_components = None
 
     asyncio.run(exercise())
