@@ -48,7 +48,9 @@ async def verified_user(
         status_code=401, detail="Authentication required.", headers=NO_STORE
     )
     try:
-        token = await components.sessions.access_token(session)
+        # Passing the OAuth client lets the store refresh an expiring token (under a row
+        # lock) instead of failing closed at the first expiry.
+        token = await components.sessions.access_token(session, components.oauth)
     except SessionError:
         raise unauthenticated from None
 

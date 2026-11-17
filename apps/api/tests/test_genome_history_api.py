@@ -1,6 +1,7 @@
 import asyncio
 import os
 from datetime import UTC, datetime
+from urllib.parse import parse_qs
 from uuid import uuid4
 
 import httpx
@@ -29,6 +30,7 @@ class FakeGitHubApi:
 
     def __init__(self) -> None:
         self.members: dict[str, tuple[int, str, list[int]]] = {}
+        self.refresh_index: dict[str, str] = {}
         self.down = False
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -44,6 +46,41 @@ class FakeGitHubApi:
         page = int(request.url.params["page"])
         ids = [{"id": item} for item in installations] if page == 1 else []
         return httpx.Response(200, json={"installations": ids})
+
+
+class FakeGitHubOAuth:
+    """github.com's token endpoint for the refresh-token grant."""
+
+    def __init__(self, github: FakeGitHubApi) -> None:
+        self.github = github
+        self.reject = False
+        self.refreshes = 0
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        form = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
+        assert form["grant_type"] == "refresh_token"
+        self.refreshes += 1
+        if self.reject:
+            return httpx.Response(200, json={"error": "bad_refresh_token"})
+        # A refresh token works exactly once; GitHub rotates the pair.
+        old_access = self.github.refresh_index.pop(form["refresh_token"], None)
+        if old_access is None:
+            return httpx.Response(200, json={"error": "bad_refresh_token"})
+        member = self.github.members.pop(old_access)
+        new_access = f"ghu_refreshed_{uuid4().hex}"
+        new_refresh = f"ghr_{uuid4().hex}"
+        self.github.members[new_access] = member
+        self.github.refresh_index[new_refresh] = new_access
+        return httpx.Response(
+            200,
+            json={
+                "access_token": new_access,
+                "refresh_token": new_refresh,
+                "expires_in": 28800,
+                "refresh_token_expires_in": 15811200,
+                "token_type": "bearer",
+            },
+        )
 
 
 class World:
@@ -66,6 +103,7 @@ class World:
             "dave": (user_base + 3, []),
         }
         self.github = FakeGitHubApi()
+        self.oauth_fake = FakeGitHubOAuth(self.github)
         self.sessions: SessionStore
         self.genome: GenomeSnapshotStore
         self.keys: dict[int, list[str]] = {self.repo1: [], self.repo2: [], self.repo3: []}
@@ -147,6 +185,9 @@ class World:
                 client_id="Iv1.test",
                 client_secret="secret",
                 redirect_uri="https://app.gitwise.test/auth/github/callback",
+                client=httpx.AsyncClient(
+                    transport=httpx.MockTransport(self.oauth_fake.handler)
+                ),
             ),
             public_base_url="https://app.gitwise.test",
             user_client_factory=lambda token: GitHubUserClient(
@@ -162,8 +203,15 @@ class World:
         user_id, installations = self.people[name]
         token = f"ghu_{name}_{uuid4().hex}"
         self.github.members[token] = (user_id, name, installations)
+        refresh = f"ghr_{uuid4().hex}"
+        self.github.refresh_index[refresh] = token
         issued = await self.sessions.create_session(
-            github_user_id=user_id, github_login=name, access_token=token
+            github_user_id=user_id,
+            github_login=name,
+            access_token=token,
+            refresh_token=refresh,
+            access_token_expires_in=28800,
+            refresh_token_expires_in=15811200,
         )
         browser = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=main.app),
@@ -404,6 +452,61 @@ def test_history_listing_orders_limits_and_validates_input() -> None:
             assert (await alice.get("/repositories/0/snapshots")).status_code == 404
             assert (await alice.get("/repositories/-5/snapshots")).status_code == 404
             assert (await alice.get("/snapshots/" + "k" * 600)).status_code == 404
+        finally:
+            await alice.aclose()
+
+    _run(scenario)
+
+
+def test_expiring_access_tokens_are_refreshed_transparently_and_expired_ones_fail_closed() -> None:
+    async def scenario(world: World) -> None:
+        alice = await world.browser_for("alice")
+        key = world.keys[world.repo1][0]
+        user_id = world.people["alice"][0]
+        try:
+            assert (await alice.get(f"/snapshots/{key}")).status_code == 200
+            assert world.oauth_fake.refreshes == 0
+
+            # Inside the safety window the store refreshes, then GitHub verifies the
+            # new token; the same session cookie keeps working without a new sign-in.
+            async with world.sessions._engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE user_sessions "
+                        "SET access_token_expires_at = now() + interval '30 seconds' "
+                        "WHERE github_user_id = :u"
+                    ),
+                    {"u": user_id},
+                )
+            assert (await alice.get(f"/snapshots/{key}")).status_code == 200
+            assert world.oauth_fake.refreshes == 1
+            assert alice.token not in world.github.members  # old token is gone at GitHub
+
+            # The rotated token is now far from expiry, so no further refresh happens.
+            assert (await alice.get(f"/snapshots/{key}")).status_code == 200
+            assert world.oauth_fake.refreshes == 1
+
+            # If GitHub rejects the refresh, history access fails closed with 401.
+            async with world.sessions._engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE user_sessions "
+                        "SET access_token_expires_at = now() - interval '1 minute' "
+                        "WHERE github_user_id = :u"
+                    ),
+                    {"u": user_id},
+                )
+            world.oauth_fake.reject = True
+            denied = await alice.get(f"/snapshots/{key}")
+            assert denied.status_code == 401
+            assert "ghu_" not in denied.text and "ghr_" not in denied.text
+
+            # Signing out stops any further refresh attempt.
+            world.oauth_fake.reject = False
+            await world.sessions.revoke_user_sessions(user_id)
+            before = world.oauth_fake.refreshes
+            assert (await alice.get(f"/snapshots/{key}")).status_code == 401
+            assert world.oauth_fake.refreshes == before
         finally:
             await alice.aclose()
 
