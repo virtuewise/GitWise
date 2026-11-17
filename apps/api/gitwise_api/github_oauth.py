@@ -182,6 +182,40 @@ class GitHubOAuthClient:
             access_token, new_refresh_token, expires_in, refresh_expires_in
         )
 
+    async def revoke_access_token(self, *, access_token: str) -> None:
+        """Revoke one GitHub App user access token after local logout commits."""
+        await self._revoke_token_endpoint("token", access_token)
+
+    async def revoke_authorization(self, *, access_token: str) -> None:
+        """Revoke the user's complete GitHub App authorization and all its tokens."""
+        await self._revoke_token_endpoint("grant", access_token)
+
+    async def _revoke_token_endpoint(self, resource: str, access_token: str) -> None:
+        if (
+            resource not in {"token", "grant"}
+            or not isinstance(access_token, str)
+            or not access_token
+            or len(access_token) > 4096
+        ):
+            raise GitHubOAuthError("GitHub authorization could not be revoked.")
+        try:
+            response = await self._client.request(
+                "DELETE",
+                f"https://api.github.com/applications/{self._client_id}/{resource}",
+                auth=(self._client_id, self._client_secret),
+                json={"access_token": access_token},
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+        except httpx.HTTPError:
+            raise GitHubOAuthError(
+                "GitHub authorization could not be revoked."
+            ) from None
+        if response.status_code != 204:
+            raise GitHubOAuthError("GitHub authorization could not be revoked.")
+
     async def close(self) -> None:
         if self._owns_client:
             await self._client.aclose()
