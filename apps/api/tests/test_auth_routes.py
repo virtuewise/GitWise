@@ -420,7 +420,8 @@ def test_signing_out_everywhere_only_ends_that_users_sessions() -> None:
                                 "SELECT count(*), bool_and(revoked_at IS NOT NULL "
                                 "AND encrypted_refresh_token IS NULL "
                                 "AND access_token_expires_at IS NULL "
-                                "AND refresh_token_expires_at IS NULL) "
+                                "AND refresh_token_expires_at IS NULL), "
+                                "array_agg(encrypted_access_token) "
                                 "FROM user_sessions WHERE session_id IN (:first, :second, :legacy)"
                             ),
                             {
@@ -432,6 +433,10 @@ def test_signing_out_everywhere_only_ends_that_users_sessions() -> None:
                     ).one()
                 assert cleared[0] == 3
                 assert cleared[1] is True
+                assert all(
+                    store._cipher.decrypt(token) == "revoked-session"
+                    for token in cleared[2]
+                )
 
                 assert (await alice.get("/auth/session")).status_code == 401
                 assert (await alice_phone.get("/auth/session")).status_code == 401
