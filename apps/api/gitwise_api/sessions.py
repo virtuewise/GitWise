@@ -545,7 +545,7 @@ class SessionStore:
                     access_tokens.append(self._cipher.decrypt(row[0]))
                 except TokenCryptoError:
                     continue
-            result = await connection.execute(
+            await connection.execute(
                 text(
                     """
                     UPDATE user_sessions
