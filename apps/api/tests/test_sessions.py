@@ -278,7 +278,7 @@ def test_logout_and_user_wide_invalidation_do_not_cross_users() -> None:
             )
 
             assert await store.revoke_session(alice_one.session_token, oauth) is True
-            assert await store.revoke_session(alice_one.session_token) is False
+            assert await store.revoke_session(alice_one.session_token, oauth) is False
             assert await store.resolve_session(alice_one.session_token) is None
             assert await store.resolve_session(alice_two.session_token) is not None
 
