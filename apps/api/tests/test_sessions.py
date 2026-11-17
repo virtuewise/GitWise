@@ -113,7 +113,7 @@ def test_session_lifecycle_and_tokens_are_encrypted_at_rest() -> None:
             session = await store.resolve_session(issued.session_token)
             assert session is not None
             assert (session.github_user_id, session.github_login) == (user_id, "maintainer")
-            assert await store.access_token(session) == ACCESS
+            assert await store.access_token(session, object()) == ACCESS
 
             assert SessionStore.csrf_matches(session, issued.csrf_token)
             assert not SessionStore.csrf_matches(session, "wrong")
@@ -181,7 +181,7 @@ def test_idle_and_absolute_expiry_fail_closed() -> None:
             from gitwise_api.sessions import SessionError
 
             with pytest.raises(SessionError):
-                await store.access_token(idle_session)
+                await store.access_token(idle_session, object())
         finally:
             await store.close()
 
@@ -247,7 +247,7 @@ def test_rotation_invalidates_previous_tokens_immediately() -> None:
             assert new_session is not None
             assert SessionStore.csrf_matches(new_session, rotated.csrf_token)
             assert not SessionStore.csrf_matches(new_session, issued.csrf_token)
-            assert await store.access_token(new_session) == ACCESS
+            assert await store.access_token(new_session, object()) == ACCESS
         finally:
             await store.close()
 
@@ -473,7 +473,7 @@ def test_unknown_access_token_expiry_fails_closed() -> None:
             session = await store.resolve_session(issued.session_token)
             assert session is not None
             with pytest.raises(SessionError):
-                await store.access_token(session)
+                await store.access_token(session, object())
         finally:
             await store.close()
 
@@ -511,6 +511,22 @@ def test_provider_refresh_failure_never_returns_the_expired_access_token() -> No
                 )
             with pytest.raises(SessionError):
                 await store.access_token(session, FailedRefresh())
+
+            async with store._engine.connect() as connection:
+                revoked = (
+                    await connection.execute(
+                        text(
+                            "SELECT revoked_at IS NOT NULL "
+                            "AND encrypted_access_token IS NULL "
+                            "AND encrypted_refresh_token IS NULL "
+                            "AND access_token_expires_at IS NULL "
+                            "AND refresh_token_expires_at IS NULL "
+                            "FROM user_sessions WHERE session_id = :s"
+                        ),
+                        {"s": session.session_id},
+                    )
+                ).scalar_one()
+            assert revoked is True
         finally:
             await store.close()
 
