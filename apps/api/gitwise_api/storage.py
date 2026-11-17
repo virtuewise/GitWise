@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal
 
 from sqlalchemy import text
@@ -13,6 +14,15 @@ from gitwise_api.github_user import VerifiedGitHubUser
 from gitwise_api.snapshot_identity import snapshot_content_digest, snapshot_storage_key
 
 PrincipalType = Literal["github_user", "github_app_installation"]
+
+
+@dataclass(frozen=True)
+class SnapshotSummary:
+    snapshot_key: str
+    commit_sha: str
+    schema_version: str
+    observed_at: datetime
+    stored_at: datetime
 
 
 class SnapshotAccessDenied(PermissionError):
@@ -136,6 +146,7 @@ class GenomeSnapshotStore:
                       AND access_grant.principal_id = ANY(:installation_ids)
                       AND access_grant.revoked_at IS NULL
                       AND access_grant.permission IN ('read', 'write', 'admin')
+                    LIMIT 1
                     FOR SHARE OF access_grant
                 """),
                 {
@@ -149,6 +160,76 @@ class GenomeSnapshotStore:
                     "No accessible Software Genome snapshot exists for this principal."
                 )
             return SoftwareGenomeSnapshot.model_validate(payload)
+
+    async def list_snapshots_for_user(
+        self,
+        provider_repository_id: int,
+        *,
+        user: VerifiedGitHubUser,
+        limit: int = 50,
+    ) -> list[SnapshotSummary]:
+        """List a repository's stored snapshots, newest first, through verified installations.
+
+        An unreadable repository and a repository with no history are indistinguishable
+        to callers: both raise ``SnapshotAccessDenied`` when no active grant exists.
+        """
+        if (
+            not isinstance(user, VerifiedGitHubUser)
+            or type(user.user_id) is not int
+            or user.user_id < 1
+            or not isinstance(user.login, str)
+            or not user.login
+        ):
+            raise ValueError("A verified GitHub user identity is required.")
+        if type(provider_repository_id) is not int or provider_repository_id < 1:
+            raise ValueError("A valid provider repository ID is required.")
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise ValueError("The history limit must be between 1 and 100.")
+        installation_ids = user.installation_ids
+        if (
+            not installation_ids
+            or any(type(item) is not int or item < 1 for item in installation_ids)
+            or len(installation_ids) != len(set(installation_ids))
+        ):
+            raise SnapshotAccessDenied(
+                "No accessible Software Genome snapshot exists for this principal."
+            )
+
+        async with self._engine.begin() as connection:
+            granted = await connection.execute(
+                text("""
+                    SELECT 1
+                    FROM repository_access_grants AS access_grant
+                    WHERE access_grant.provider = 'github'
+                      AND access_grant.provider_repository_id = :repository_id
+                      AND access_grant.principal_type = 'github_app_installation'
+                      AND access_grant.principal_id = ANY(:installation_ids)
+                      AND access_grant.revoked_at IS NULL
+                      AND access_grant.permission IN ('read', 'write', 'admin')
+                    LIMIT 1
+                    FOR SHARE OF access_grant
+                """),
+                {
+                    "repository_id": provider_repository_id,
+                    "installation_ids": [str(item) for item in installation_ids],
+                },
+            )
+            if granted.first() is None:
+                raise SnapshotAccessDenied(
+                    "No accessible Software Genome snapshot exists for this principal."
+                )
+            rows = await connection.execute(
+                text("""
+                    SELECT snapshot_key, commit_sha, schema_version, observed_at, stored_at
+                    FROM software_genome_snapshots
+                    WHERE provider = 'github'
+                      AND provider_repository_id = :repository_id
+                    ORDER BY stored_at DESC, snapshot_key
+                    LIMIT :limit
+                """),
+                {"repository_id": provider_repository_id, "limit": limit},
+            )
+            return [SnapshotSummary(*row) for row in rows]
 
     async def store_snapshot(
         self,

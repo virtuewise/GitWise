@@ -16,6 +16,7 @@ from gitwise_api.github_installation_events import (
     process_installation_event,
 )
 from gitwise_api.github_oauth import GitHubOAuthClient
+from gitwise_api.history import router as history_router
 from gitwise_api.ingestion import GitHubRepositoryClient
 from gitwise_api.installation_grants import InstallationGrantStore
 from gitwise_api.repositories import (
@@ -25,6 +26,7 @@ from gitwise_api.repositories import (
     parse_github_repository_url,
 )
 from gitwise_api.sessions import SessionStore
+from gitwise_api.storage import GenomeSnapshotStore
 from gitwise_api.token_crypto import TokenCipher
 from gitwise_api.webhook_deliveries import (
     GitHubWebhookDeliveryStore,
@@ -73,10 +75,18 @@ async def lifespan(application: FastAPI):
         if settings.database_url
         else None
     )
+    application.state.genome_snapshot_store = (
+        GenomeSnapshotStore.from_url(settings.database_url)
+        if settings.database_url
+        else None
+    )
     application.state.auth_components = _build_auth_components(settings)
     try:
         yield
     finally:
+        genome_store = getattr(application.state, "genome_snapshot_store", None)
+        if genome_store is not None:
+            await genome_store.close()
         auth = getattr(application.state, "auth_components", None)
         if auth is not None:
             await auth.sessions.close()
@@ -100,6 +110,7 @@ app = FastAPI(
 
 
 app.include_router(auth_router)
+app.include_router(history_router)
 
 
 @app.get("/health", tags=["operations"])

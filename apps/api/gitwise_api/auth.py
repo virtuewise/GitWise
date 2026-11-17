@@ -166,6 +166,7 @@ async def complete_github_login(
             access_token=tokens.access_token,
             refresh_token=tokens.refresh_token,
             access_token_expires_in=tokens.expires_in,
+            refresh_token_expires_in=tokens.refresh_token_expires_in,
         )
     except SessionError:
         return _sign_in_failure(components)

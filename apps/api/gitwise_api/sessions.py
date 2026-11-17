@@ -19,6 +19,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from gitwise_api.github_oauth import GitHubOAuthClient, GitHubOAuthError
 from gitwise_api.token_crypto import TokenCipher, TokenCryptoError
 
 MAX_TOKEN_LENGTH = 256
@@ -59,6 +60,10 @@ def _digest(value: str) -> bytes:
 
 def _plausible_token(value: object) -> bool:
     return isinstance(value, str) and 0 < len(value) <= MAX_TOKEN_LENGTH
+
+
+async def _database_time(connection) -> datetime:
+    return (await connection.execute(text("SELECT now()"))).scalar_one()
 
 
 class SessionStore:
@@ -164,12 +169,19 @@ class SessionStore:
         access_token: str,
         refresh_token: str | None = None,
         access_token_expires_in: int | None = None,
+        refresh_token_expires_in: int | None = None,
     ) -> IssuedSession:
         """Create a session for an identity GitHub has already verified."""
         if type(github_user_id) is not int or github_user_id < 1:
             raise SessionError("A verified GitHub user ID is required.")
         if not isinstance(github_login, str) or not 0 < len(github_login) <= 255:
             raise SessionError("A verified GitHub login is required.")
+        if refresh_token is None and refresh_token_expires_in is not None:
+            raise SessionError("Refresh token expiry requires a refresh token.")
+        if refresh_token is not None and (
+            type(refresh_token_expires_in) is not int or refresh_token_expires_in < 1
+        ):
+            raise SessionError("A valid refresh token expiry is required.")
         session_token = secrets.token_urlsafe(32)
         csrf_token = secrets.token_urlsafe(32)
         async with self._engine.begin() as connection:
@@ -180,13 +192,16 @@ class SessionStore:
                         INSERT INTO user_sessions (
                             session_id, token_hash, csrf_hash, github_user_id, github_login,
                             encrypted_access_token, encrypted_refresh_token,
-                            access_token_expires_at, idle_expires_at, absolute_expires_at
+                            access_token_expires_at, refresh_token_expires_at,
+                            idle_expires_at, absolute_expires_at
                         )
                         VALUES (
                             :session_id, :token_hash, :csrf_hash, :user_id, :login,
                             :access, :refresh,
                             CASE WHEN CAST(:expires_in AS INTEGER) IS NULL THEN NULL
                                  ELSE now() + make_interval(secs => :expires_in) END,
+                            CASE WHEN CAST(:refresh_expires_in AS INTEGER) IS NULL THEN NULL
+                                 ELSE now() + make_interval(secs => :refresh_expires_in) END,
                             now() + make_interval(secs => :idle),
                             now() + make_interval(secs => :absolute)
                         )
@@ -202,6 +217,7 @@ class SessionStore:
                         "access": self._cipher.encrypt(access_token),
                         "refresh": self._cipher.encrypt(refresh_token) if refresh_token else None,
                         "expires_in": access_token_expires_in,
+                        "refresh_expires_in": refresh_token_expires_in,
                         "idle": self._idle_ttl.total_seconds(),
                         "absolute": self._absolute_ttl.total_seconds(),
                     },
@@ -247,27 +263,117 @@ class SessionStore:
             return False
         return hmac.compare_digest(session.csrf_hash, _digest(csrf_token))
 
-    async def access_token(self, session: AuthenticatedSession) -> str:
-        """Decrypt the user's GitHub token for a server-side GitHub call."""
-        async with self._engine.connect() as connection:
-            row = (
+    async def access_token(
+        self,
+        session: AuthenticatedSession,
+        oauth: GitHubOAuthClient | None = None,
+    ) -> str:
+        """Return a live access token, refreshing and rotating it under a row lock.
+
+        The database row lock serializes refresh attempts across API workers. The
+        provider exchange and replacement ciphertext are committed as one database
+        transaction; stale concurrent callers then observe the new access token.
+        """
+        try:
+            async with self._engine.begin() as connection:
+                row = (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT encrypted_access_token, encrypted_refresh_token,
+                                   access_token_expires_at, refresh_token_expires_at
+                            FROM user_sessions
+                            WHERE session_id = :session_id
+                              AND revoked_at IS NULL
+                              AND idle_expires_at > now()
+                              AND absolute_expires_at > now()
+                            FOR UPDATE
+                            """
+                        ),
+                        {"session_id": session.session_id},
+                    )
+                ).first()
+                if row is None:
+                    raise SessionError("Session is no longer valid.")
+
+                access_token = self._cipher.decrypt(row[0])
+                database_now = await _database_time(connection)
+                if row[2] is None:
+                    raise SessionError("GitHub authorization must be renewed.")
+                if row[2] > database_now + timedelta(minutes=2):
+                    return access_token
+                if oauth is None or row[1] is None or row[3] is None:
+                    raise SessionError("GitHub authorization must be renewed.")
+                refresh_token = self._cipher.decrypt(row[1])
+                refresh_valid = (
+                    await connection.execute(
+                        text(
+                            "SELECT :expiry > now() + interval '30 seconds'"
+                        ),
+                        {"expiry": row[3]},
+                    )
+                ).scalar_one()
+                if not refresh_valid:
+                    raise SessionError("GitHub authorization must be renewed.")
+
+                try:
+                    tokens = await oauth.refresh_access_token(
+                        refresh_token=refresh_token
+                    )
+                except GitHubOAuthError:
+                    raise SessionError(
+                        "GitHub authorization must be renewed."
+                    ) from None
+                if (
+                    tokens.refresh_token is None
+                    or tokens.refresh_token_expires_in is None
+                    or tokens.expires_in is None
+                ):
+                    raise SessionError("GitHub authorization must be renewed.")
+
+                # The transaction may have held the row lock during a slow provider
+                # request. PostgreSQL now() is fixed at transaction start, so recheck
+                # the session against the wall clock before releasing a token.
+                session_live = (
+                    await connection.execute(
+                        text(
+                            """
+                            SELECT revoked_at IS NULL
+                               AND idle_expires_at > clock_timestamp()
+                               AND absolute_expires_at > clock_timestamp()
+                            FROM user_sessions
+                            WHERE session_id = :session_id
+                            """
+                        ),
+                        {"session_id": session.session_id},
+                    )
+                ).scalar_one()
+                if not session_live:
+                    raise SessionError("Session is no longer valid.")
+
                 await connection.execute(
                     text(
                         """
-                        SELECT encrypted_access_token FROM user_sessions
+                        UPDATE user_sessions
+                        SET encrypted_access_token = :access,
+                            encrypted_refresh_token = :refresh,
+                            access_token_expires_at =
+                                now() + make_interval(secs => :access_ttl),
+                            refresh_token_expires_at =
+                                now() + make_interval(secs => :refresh_ttl)
                         WHERE session_id = :session_id
                           AND revoked_at IS NULL
-                          AND idle_expires_at > now()
-                          AND absolute_expires_at > now()
                         """
                     ),
-                    {"session_id": session.session_id},
+                    {
+                        "access": self._cipher.encrypt(tokens.access_token),
+                        "refresh": self._cipher.encrypt(tokens.refresh_token),
+                        "access_ttl": tokens.expires_in,
+                        "refresh_ttl": tokens.refresh_token_expires_in,
+                        "session_id": session.session_id,
+                    },
                 )
-            ).first()
-        if row is None:
-            raise SessionError("Session is no longer valid.")
-        try:
-            return self._cipher.decrypt(row[0])
+                return tokens.access_token
         except TokenCryptoError:
             raise SessionError("Session is no longer valid.") from None
 
