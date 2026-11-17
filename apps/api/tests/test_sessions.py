@@ -580,3 +580,57 @@ def test_session_expiring_during_refresh_fails_closed() -> None:
             await store.close()
 
     asyncio.run(exercise())
+
+
+def test_connect_failure_keeps_refresh_credentials_retryable() -> None:
+    async def exercise() -> None:
+        from gitwise_api.github_oauth import GitHubOAuthConnectError
+        from gitwise_api.sessions import SessionError
+
+        class ConnectFailure:
+            async def refresh_access_token(self, *, refresh_token: str):
+                assert refresh_token == REFRESH
+                raise GitHubOAuthConnectError(
+                    "GitHub authorization could not be refreshed."
+                )
+
+        store = _store()
+        try:
+            issued = await store.create_session(
+                github_user_id=_user_id(),
+                github_login="connect-failure",
+                access_token=ACCESS,
+                refresh_token=REFRESH,
+                access_token_expires_in=28800,
+                refresh_token_expires_in=15897600,
+            )
+            session = await store.resolve_session(issued.session_token)
+            assert session is not None
+            async with store._engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE user_sessions SET access_token_expires_at = "
+                        "now() - interval '1 second' WHERE session_id = :s"
+                    ),
+                    {"s": session.session_id},
+                )
+
+            with pytest.raises(SessionError):
+                await store.access_token(session, ConnectFailure())
+
+            async with store._engine.connect() as connection:
+                row = (
+                    await connection.execute(
+                        text(
+                            "SELECT revoked_at, encrypted_refresh_token "
+                            "FROM user_sessions WHERE session_id = :s"
+                        ),
+                        {"s": session.session_id},
+                    )
+                ).one()
+            assert row[0] is None
+            assert store._cipher.decrypt(row[1]) == REFRESH
+        finally:
+            await store.close()
+
+    asyncio.run(exercise())
