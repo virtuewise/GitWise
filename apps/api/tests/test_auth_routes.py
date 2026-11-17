@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import hashlib
+import json
 import os
 from urllib.parse import parse_qs, urlparse
 
@@ -44,9 +45,7 @@ class FakeGitHub:
 
     def oauth_handler(self, request: httpx.Request) -> httpx.Response:
         if request.method == "DELETE":
-            access_token = request.read().decode()
-            import json
-            token = json.loads(access_token)["access_token"]
+            token = json.loads(request.content.decode())["access_token"]
             if request.url.path.endswith("/grant"):
                 self.revoked_grants.append(token)
             else:
@@ -299,6 +298,8 @@ def test_state_changing_requests_need_a_matching_csrf_token_and_logout_ends_the_
                 callback, _ = await _sign_in(browser, "code-alice")
                 csrf = browser.cookies[CSRF_COOKIE]
                 old_session = browser.cookies[SESSION_COOKIE]
+                session_record = await store.resolve_session(old_session)
+                assert session_record is not None
 
                 assert (await browser.post("/auth/logout")).status_code == 403
                 wrong = await browser.post("/auth/logout", headers={"x-csrf-token": "nope"})
@@ -357,7 +358,8 @@ def test_rotation_replaces_cookies_and_kills_the_previous_session_token() -> Non
 
 def test_signing_out_everywhere_only_ends_that_users_sessions() -> None:
     async def exercise() -> None:
-        store = _install(FakeGitHub())
+        github = FakeGitHub()
+        store = _install(github)
         try:
             async with _browser() as alice, _browser() as alice_phone, _browser() as bob:
                 await _sign_in(alice, "code-alice")
@@ -369,6 +371,8 @@ def test_signing_out_everywhere_only_ends_that_users_sessions() -> None:
                     "/auth/logout/all", headers={"x-csrf-token": alice.cookies[CSRF_COOKIE]}
                 )
                 assert response.status_code == 204
+                assert github.revoked_grants == ["ghu_alice_token"]
+                assert github.revoked_tokens == []
 
                 assert (await alice.get("/auth/session")).status_code == 401
                 assert (await alice_phone.get("/auth/session")).status_code == 401
