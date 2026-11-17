@@ -7,7 +7,6 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
-from sqlalchemy import text
 from cryptography.fernet import Fernet
 from gitwise_api import main
 from gitwise_api.auth import (
@@ -20,6 +19,7 @@ from gitwise_api.github_oauth import GitHubOAuthClient
 from gitwise_api.github_user import GitHubUserClient
 from gitwise_api.sessions import SessionStore
 from gitwise_api.token_crypto import TokenCipher
+from sqlalchemy import text
 
 DATABASE_URL = os.getenv("GITWISE_DATABASE_URL")
 BASE = "https://app.gitwise.test"
