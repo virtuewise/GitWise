@@ -57,6 +57,12 @@ Before enabling private repositories, implement and test the authorization model
 
 Define retention per repository owner before production storage. Deletion must remove or render inaccessible the snapshot payload and derived indexes according to the published policy, while retaining only the minimum legally/operationally required audit record. Revoking an installation must immediately block future reads and jobs; it must not leave background workers with reusable access.
 
+## GitHub user-token lifecycle
+
+GitHub App user access tokens and refresh tokens are encrypted at rest. The session schema records both expiry timestamps. Before returning an access token, the session store checks its expiry using the PostgreSQL clock and refreshes within a two-minute safety window. Refresh exchanges are serialized by locking the session row, preventing concurrent workers from consuming the same rotating refresh token. The newly returned token pair and expiry values are encrypted and persisted in the same database transaction. A missing or expired refresh token, unknown access-token expiry, or provider rejection fails closed.
+
+The provider exchange and local database commit cannot form a distributed transaction. If GitHub rotates a refresh token but the database transaction subsequently fails, the old token may no longer work; the safe recovery is a fresh user authorization rather than reuse of stale credentials. Legacy sessions with a refresh token but no recorded refresh expiry cannot be refreshed.
+
 ## Implementation sequence
 
 1. **Completed:** expose GitHub's immutable numeric repository ID in new Software Genome snapshots.
