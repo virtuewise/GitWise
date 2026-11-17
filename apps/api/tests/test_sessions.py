@@ -364,7 +364,18 @@ def test_expired_access_token_is_refreshed_and_rotated_atomically() -> None:
                 ).one()
             assert store._cipher.decrypt(row[0]) == "ghu_rotated_access"
             assert store._cipher.decrypt(row[1]) == "ghr_rotated_refresh"
-            assert row[2] > row[3] - timedelta(days=180)
+            async with store._engine.connect() as connection:
+                live = (
+                    await connection.execute(
+                        text(
+                            "SELECT access_token_expires_at > now() + interval '7 hours' "
+                            "AND refresh_token_expires_at > now() + interval '180 days' "
+                            "FROM user_sessions WHERE session_id = :s"
+                        ),
+                        {"s": session.session_id},
+                    )
+                ).scalar_one()
+            assert live is True
 
         finally:
             await store.close()
