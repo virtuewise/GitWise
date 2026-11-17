@@ -86,7 +86,12 @@ def test_exchange_sends_secret_and_verifier_in_the_body_and_parses_tokens() -> N
             )
 
         tokens = await _client(handler).exchange_code(code="abc", code_verifier="ver")
-        assert (tokens.access_token, tokens.refresh_token, tokens.expires_in) == (
+        assert (
+            tokens.access_token,
+            tokens.refresh_token,
+            tokens.expires_in,
+            tokens.refresh_token_expires_in,
+        ) == (
             "ghu_x",
             "ghr_y",
             28800,
