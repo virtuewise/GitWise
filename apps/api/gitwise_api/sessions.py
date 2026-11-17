@@ -298,7 +298,8 @@ class SessionStore:
 
                 access_token = self._cipher.decrypt(row[0])
                 # A null access expiry is retained only for legacy/test-created sessions.
-                if row[2] is None or row[2] > await _database_time(connection):
+                database_now = await _database_time(connection)
+                if row[2] is None or row[2] > database_now + timedelta(minutes=2):
                     return access_token
                 if oauth is None or row[1] is None or row[3] is None:
                     raise SessionError("GitHub authorization must be renewed.")
