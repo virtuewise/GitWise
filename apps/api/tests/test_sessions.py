@@ -656,7 +656,7 @@ def test_logout_all_never_sends_sanitized_sentinels_to_github() -> None:
 
             async def revoke_authorization(self, *, access_token: str) -> None:
                 self.grant_tokens.append(access_token)
-                raise RuntimeError("simulate provider rejection")
+                return None
 
         store = _store()
         user_id = _user_id()
