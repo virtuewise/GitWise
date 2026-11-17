@@ -63,6 +63,11 @@ GitHub App user access tokens and refresh tokens are encrypted at rest. The sess
 
 The provider exchange and local database commit cannot form a distributed transaction. If GitHub rotates a refresh token but the database transaction subsequently fails, the old token may no longer work; the safe recovery is a fresh user authorization rather than reuse of stale credentials. Legacy sessions with a refresh token but no recorded refresh expiry cannot be refreshed.
 
+Logout and token revocation
+
+Local logout is committed before any network call to GitHub. The transaction serializes against refresh using the session row lock, marks the session revoked, clears the encrypted refresh token and both expiry timestamps, and replaces the non-null access-token ciphertext with an encrypted non-credential sentinel. A single-session logout then best-effort calls GitHub's `DELETE /applications/{client_id}/token` endpoint to revoke that user access token. Logout-all locks and sanitizes every active session for the verified GitHub user, then best-effort calls `DELETE /applications/{client_id}/grant` to revoke the user's complete GitHub App authorization and associated tokens. Provider failures never roll back local logout or restore local token material. These operations occur after the local transaction commits so database locks are not held across network calls. PostgreSQL tests assert credential cleanup, scope of revocation, and local fail-closed behavior when GitHub returns an error.
+
+
 ## Implementation sequence
 
 1. **Completed:** expose GitHub's immutable numeric repository ID in new Software Genome snapshots.
