@@ -256,6 +256,14 @@ def test_rotation_invalidates_previous_tokens_immediately() -> None:
 
 def test_logout_and_user_wide_invalidation_do_not_cross_users() -> None:
     async def exercise() -> None:
+        class NoopRevoker:
+            async def revoke_access_token(self, *, access_token: str) -> None:
+                return None
+
+            async def revoke_authorization(self, *, access_token: str) -> None:
+                return None
+
+        oauth = NoopRevoker()
         store = _store()
         alice_id, bob_id = _user_id(), _user_id()
         try:
@@ -269,12 +277,12 @@ def test_logout_and_user_wide_invalidation_do_not_cross_users() -> None:
                 github_user_id=bob_id, github_login="bob", access_token=ACCESS
             )
 
-            assert await store.revoke_session(alice_one.session_token) is True
+            assert await store.revoke_session(alice_one.session_token, oauth) is True
             assert await store.revoke_session(alice_one.session_token) is False
             assert await store.resolve_session(alice_one.session_token) is None
             assert await store.resolve_session(alice_two.session_token) is not None
 
-            assert await store.revoke_user_sessions(alice_id) == 1
+            assert await store.revoke_user_sessions(alice_id, oauth) == 1
             assert await store.resolve_session(alice_two.session_token) is None
             bob_session = await store.resolve_session(bob.session_token)
             assert bob_session is not None
