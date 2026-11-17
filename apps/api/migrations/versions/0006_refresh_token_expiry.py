@@ -17,9 +17,7 @@ def upgrade() -> None:
         ALTER TABLE user_sessions
         ADD CONSTRAINT ck_user_sessions_refresh_expiry_pair
         CHECK (
-            (encrypted_refresh_token IS NULL AND refresh_token_expires_at IS NULL)
-            OR
-            (encrypted_refresh_token IS NOT NULL AND refresh_token_expires_at IS NOT NULL)
+            refresh_token_expires_at IS NULL OR encrypted_refresh_token IS NOT NULL
         )
     """)
 
