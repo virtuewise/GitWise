@@ -464,7 +464,9 @@ class SessionStore:
             return None
         return IssuedSession(new_session_token, new_csrf_token, row[0])
 
-    async def revoke_session(self, session_token: str, oauth) -> bool:
+    async def revoke_session(
+        self, session_token: str, oauth: GitHubOAuthClient
+    ) -> bool:
         """Revoke one local session, then best-effort revoke its GitHub token."""
         if not _plausible_token(session_token):
             return False
@@ -515,7 +517,9 @@ class SessionStore:
                 pass
         return True
 
-    async def revoke_user_sessions(self, github_user_id: int, oauth) -> int:
+    async def revoke_user_sessions(
+        self, github_user_id: int, oauth: GitHubOAuthClient
+    ) -> int:
         """Revoke all local sessions and the user's GitHub App authorization."""
         access_tokens: list[str] = []
         async with self._engine.begin() as connection:
@@ -557,10 +561,13 @@ class SessionStore:
             )
         # A grant revocation invalidates every access/refresh token for this app
         # and user. One surviving access token is sufficient for the API call.
-        if access_tokens:
+        for access_token in access_tokens:
             try:
-                await oauth.revoke_authorization(access_token=access_tokens[0])
+                await oauth.revoke_authorization(access_token=access_token)
+                break
             except GitHubOAuthError:
-                pass
+                # The first session's access token may already have expired; try
+                # another still-active session before giving up best-effort cleanup.
+                continue
         return result.rowcount
 
