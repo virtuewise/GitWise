@@ -759,3 +759,48 @@ def test_terminal_session_purge_skips_rows_locked_by_live_requests() -> None:
             await store.close()
 
     asyncio.run(exercise())
+
+
+def test_logout_all_never_sends_sanitized_sentinels_to_github() -> None:
+    async def exercise() -> None:
+        class Revoker:
+            def __init__(self) -> None:
+                self.grant_tokens: list[str] = []
+
+            async def revoke_access_token(self, *, access_token: str) -> None:
+                return None
+
+            async def revoke_authorization(self, *, access_token: str) -> None:
+                self.grant_tokens.append(access_token)
+                return None
+
+        store = _store()
+        user_id = _user_id()
+        try:
+            revoker = Revoker()
+            for _ in range(3):
+                issued = await store.create_session(
+                    github_user_id=user_id,
+                    github_login="sentinel-test",
+                    access_token=ACCESS,
+                    refresh_token=REFRESH,
+                    access_token_expires_in=28800,
+                    refresh_token_expires_in=15897600,
+                )
+                assert await store.revoke_session(issued.session_token, revoker) is True
+
+            await store.create_session(
+                github_user_id=user_id,
+                github_login="sentinel-test",
+                access_token="ghu_current_access",
+                refresh_token="ghr_current_refresh",
+                access_token_expires_in=28800,
+                refresh_token_expires_in=15897600,
+            )
+            assert await store.revoke_user_sessions(user_id, revoker) == 1
+            assert revoker.grant_tokens == ["ghu_current_access"]
+            assert "revoked-session" not in revoker.grant_tokens
+        finally:
+            await store.close()
+
+    asyncio.run(exercise())
