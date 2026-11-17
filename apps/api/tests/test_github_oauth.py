@@ -166,3 +166,54 @@ def test_refresh_rejects_invalid_or_non_rotating_responses(payload: dict) -> Non
             await client.refresh_access_token(refresh_token="ghr_old")
 
     asyncio.run(exercise())
+
+
+def test_revoke_access_token_uses_github_app_token_endpoint() -> None:
+    async def exercise() -> None:
+        seen: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["method"] = request.method
+            seen["url"] = str(request.url)
+            seen["auth"] = request.headers.get("Authorization")
+            seen["payload"] = __import__("json").loads(request.content)
+            return httpx.Response(204)
+
+        await _client(handler).revoke_access_token(access_token="ghu_revoke_me")
+        assert seen["method"] == "DELETE"
+        assert seen["url"].endswith("/applications/Iv1.abc/token")
+        assert seen["auth"] == "Basic " + __import__("base64").b64encode(
+            b"Iv1.abc:shh"
+        ).decode()
+        assert seen["payload"] == {"access_token": "ghu_revoke_me"}
+
+    asyncio.run(exercise())
+
+
+def test_revoke_authorization_uses_grant_endpoint() -> None:
+    async def exercise() -> None:
+        seen: dict[str, object] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["url"] = str(request.url)
+            seen["payload"] = __import__("json").loads(request.content)
+            return httpx.Response(204)
+
+        await _client(handler).revoke_authorization(access_token="ghu_grant_owner")
+        assert seen["url"].endswith("/applications/Iv1.abc/grant")
+        assert seen["payload"] == {"access_token": "ghu_grant_owner"}
+
+    asyncio.run(exercise())
+
+
+def test_revoke_failure_is_generic_and_does_not_leak_token_material() -> None:
+    async def exercise() -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(422, json={"message": "invalid token"})
+
+        with pytest.raises(GitHubOAuthError) as failure:
+            await _client(handler).revoke_access_token(access_token="ghu_secret")
+        assert "ghu_secret" not in str(failure.value)
+        assert "shh" not in str(failure.value)
+
+    asyncio.run(exercise())
