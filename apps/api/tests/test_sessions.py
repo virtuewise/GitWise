@@ -305,8 +305,6 @@ def test_rejects_unverified_identity_inputs() -> None:
 
 def test_expired_access_token_is_refreshed_and_rotated_atomically() -> None:
     async def exercise() -> None:
-        from datetime import timedelta
-
         from gitwise_api.github_oauth import OAuthTokens
 
         class FakeOAuth:
