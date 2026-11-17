@@ -236,7 +236,7 @@ async def logout(
     request: Request, _: AuthenticatedSession = Depends(csrf_protected_session)
 ) -> Response:
     components = _components(request)
-    await components.sessions.revoke_session(request.cookies[SESSION_COOKIE])
+    await components.sessions.revoke_session(request.cookies[SESSION_COOKIE], components.oauth)
     response = Response(status_code=204, headers=NO_STORE)
     _clear_session_cookies(response, components)
     return response
@@ -247,7 +247,7 @@ async def logout_everywhere(
     request: Request, session: AuthenticatedSession = Depends(csrf_protected_session)
 ) -> Response:
     components = _components(request)
-    await components.sessions.revoke_user_sessions(session.github_user_id)
+    await components.sessions.revoke_user_sessions(session.github_user_id, components.oauth)
     response = Response(status_code=204, headers=NO_STORE)
     _clear_session_cookies(response, components)
     return response
