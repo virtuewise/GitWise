@@ -7,6 +7,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
+from sqlalchemy import text
 from cryptography.fernet import Fernet
 from gitwise_api import main
 from gitwise_api.auth import (
@@ -310,6 +311,21 @@ def test_state_changing_requests_need_a_matching_csrf_token_and_logout_ends_the_
                 assert done.status_code == 204
                 assert github.revoked_tokens == ["ghu_alice_token"]
                 assert github.revoked_grants == []
+                async with store._engine.connect() as connection:
+                    cleared = (
+                        await connection.execute(
+                            text(
+                                "SELECT revoked_at IS NOT NULL "
+                                "AND encrypted_refresh_token IS NULL "
+                                "AND access_token_expires_at IS NULL "
+                                "AND refresh_token_expires_at IS NULL, encrypted_access_token "
+                                "FROM user_sessions WHERE session_id = :sid"
+                            ),
+                            {"sid": session_record.session_id},
+                        )
+                    ).one()
+                assert cleared[0] is True
+                assert store._cipher.decrypt(cleared[1]) == "revoked-session"
                 assert (await browser.get("/auth/session")).status_code == 401
 
             # The old cookie is dead server-side, not merely deleted from the browser.
