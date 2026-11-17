@@ -108,3 +108,56 @@ def test_oversized_authorization_code_is_rejected_before_any_request() -> None:
             await _client(handler).exchange_code(code="x" * 600, code_verifier="v")
 
     asyncio.run(exercise())
+
+
+
+def test_refresh_exchange_rotates_both_tokens_and_uses_refresh_grant() -> None:
+    async def exercise() -> None:
+        seen: dict[str, str] = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.update({k: v[0] for k, v in parse_qs(request.content.decode()).items()})
+            return httpx.Response(
+                200,
+                json={
+                    "access_token": "ghu_new",
+                    "refresh_token": "ghr_new",
+                    "expires_in": 28800,
+                    "refresh_token_expires_in": 15897600,
+                    "token_type": "bearer",
+                },
+            )
+
+        tokens = await _client(handler).refresh_access_token(refresh_token="ghr_old")
+        assert tokens.access_token == "ghu_new"
+        assert tokens.refresh_token == "ghr_new"
+        assert tokens.expires_in == 28800
+        assert tokens.refresh_token_expires_in == 15897600
+        assert seen["grant_type"] == "refresh_token"
+        assert seen["refresh_token"] == "ghr_old"
+        assert seen["client_id"] == "Iv1.abc"
+        assert seen["client_secret"] == "shh"
+        assert "ghu_new" not in repr(tokens)
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"error": "invalid_grant"},
+        {"access_token": "new", "refresh_token": "old", "expires_in": 28800,
+         "refresh_token_expires_in": 15897600, "token_type": "bearer"},
+        {"access_token": "new", "refresh_token": "rotated", "expires_in": True,
+         "refresh_token_expires_in": 15897600, "token_type": "bearer"},
+        {"access_token": "new", "refresh_token": "rotated", "expires_in": 28800,
+         "refresh_token_expires_in": 0, "token_type": "bearer"},
+    ],
+)
+def test_refresh_rejects_invalid_or_non_rotating_responses(payload: dict) -> None:
+    async def exercise() -> None:
+        client = _client(lambda request: httpx.Response(200, json=payload))
+        with pytest.raises(GitHubOAuthError):
+            await client.refresh_access_token(refresh_token="ghr_old")
+
+    asyncio.run(exercise())
