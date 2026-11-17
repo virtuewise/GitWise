@@ -12,11 +12,16 @@ class GitHubOAuthError(RuntimeError):
     """The authorization code could not be exchanged. Never carries token material."""
 
 
+class GitHubOAuthConnectError(GitHubOAuthError):
+    """A connection could not be established; the refresh request was not sent."""
+
+
 @dataclass(frozen=True)
 class OAuthTokens:
     access_token: str = field(repr=False)
     refresh_token: str | None = field(default=None, repr=False)
     expires_in: int | None = None
+    refresh_token_expires_in: int | None = None
 
 
 class GitHubOAuthClient:
@@ -25,6 +30,7 @@ class GitHubOAuthClient:
     AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
     TOKEN_URL = "https://github.com/login/oauth/access_token"
     MAX_CODE_LENGTH = 512
+    MAX_REFRESH_TOKEN_LENGTH = 2048
 
     def __init__(
         self,
@@ -94,13 +100,121 @@ class GitHubOAuthClient:
             raise failure
         refresh_token = payload.get("refresh_token")
         if refresh_token is not None and not (
-            isinstance(refresh_token, str) and refresh_token
+            isinstance(refresh_token, str)
+            and 0 < len(refresh_token) <= self.MAX_REFRESH_TOKEN_LENGTH
         ):
             raise failure
         expires_in = payload.get("expires_in")
-        if expires_in is not None and (type(expires_in) is not int or expires_in < 1):
+        if type(expires_in) is not int or expires_in < 1:
             raise failure
-        return OAuthTokens(access_token, refresh_token, expires_in)
+        refresh_token_expires_in = payload.get("refresh_token_expires_in")
+        if refresh_token is not None and (
+            type(refresh_token_expires_in) is not int or refresh_token_expires_in < 1
+        ):
+            raise failure
+        if refresh_token is None and refresh_token_expires_in is not None:
+            raise failure
+        return OAuthTokens(
+            access_token, refresh_token, expires_in, refresh_token_expires_in
+        )
+
+    async def refresh_access_token(self, *, refresh_token: str) -> OAuthTokens:
+        """Exchange a refresh token and return the newly rotated token pair.
+
+        GitHub invalidates the old refresh token when this succeeds. Callers must
+        serialize exchanges and persist the complete new pair atomically.
+        """
+        if (
+            not isinstance(refresh_token, str)
+            or not 0 < len(refresh_token) <= self.MAX_REFRESH_TOKEN_LENGTH
+        ):
+            raise GitHubOAuthError("GitHub authorization could not be refreshed.")
+        try:
+            response = await self._client.post(
+                self.TOKEN_URL,
+                data={
+                    "client_id": self._client_id,
+                    "client_secret": self._client_secret,
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                },
+                headers={"Accept": "application/json"},
+            )
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            # No HTTP request reached GitHub, so the one-time refresh token is
+            # still safe to retry on the next request.
+            raise GitHubOAuthConnectError(
+                "GitHub authorization could not be refreshed."
+            ) from None
+        except httpx.HTTPError:
+            # Read/write/protocol failures are ambiguous: GitHub may already have
+            # rotated the one-time token. The session layer must revoke locally.
+            raise GitHubOAuthError(
+                "GitHub authorization could not be refreshed."
+            ) from None
+        failure = GitHubOAuthError("GitHub authorization could not be refreshed.")
+        if response.status_code != 200:
+            raise failure
+        try:
+            payload = response.json()
+        except ValueError:
+            raise failure from None
+        if not isinstance(payload, dict) or "error" in payload:
+            raise failure
+        access_token = payload.get("access_token")
+        new_refresh_token = payload.get("refresh_token")
+        expires_in = payload.get("expires_in")
+        refresh_expires_in = payload.get("refresh_token_expires_in")
+        if (
+            not isinstance(access_token, str)
+            or not access_token
+            or not isinstance(new_refresh_token, str)
+            or not 0 < len(new_refresh_token) <= self.MAX_REFRESH_TOKEN_LENGTH
+            or new_refresh_token == refresh_token
+            or str(payload.get("token_type", "")).lower() != "bearer"
+            or type(expires_in) is not int
+            or expires_in < 1
+            or type(refresh_expires_in) is not int
+            or refresh_expires_in < 1
+        ):
+            raise failure
+        return OAuthTokens(
+            access_token, new_refresh_token, expires_in, refresh_expires_in
+        )
+
+    async def revoke_access_token(self, *, access_token: str) -> None:
+        """Revoke one GitHub App user access token after local logout commits."""
+        await self._revoke_token_endpoint("token", access_token)
+
+    async def revoke_authorization(self, *, access_token: str) -> None:
+        """Revoke the user's complete GitHub App authorization and all its tokens."""
+        await self._revoke_token_endpoint("grant", access_token)
+
+    async def _revoke_token_endpoint(self, resource: str, access_token: str) -> None:
+        if (
+            resource not in {"token", "grant"}
+            or not isinstance(access_token, str)
+            or not access_token
+            or len(access_token) > 4096
+        ):
+            raise GitHubOAuthError("GitHub authorization could not be revoked.")
+        try:
+            response = await self._client.request(
+                "DELETE",
+                f"https://api.github.com/applications/{self._client_id}/{resource}",
+                auth=(self._client_id, self._client_secret),
+                json={"access_token": access_token},
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+            )
+        except httpx.HTTPError:
+            raise GitHubOAuthError(
+                "GitHub authorization could not be revoked."
+            ) from None
+        if response.status_code != 204:
+            raise GitHubOAuthError("GitHub authorization could not be revoked.")
 
     async def close(self) -> None:
         if self._owns_client:

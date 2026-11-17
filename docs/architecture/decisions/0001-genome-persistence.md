@@ -57,6 +57,17 @@ Before enabling private repositories, implement and test the authorization model
 
 Define retention per repository owner before production storage. Deletion must remove or render inaccessible the snapshot payload and derived indexes according to the published policy, while retaining only the minimum legally/operationally required audit record. Revoking an installation must immediately block future reads and jobs; it must not leave background workers with reusable access.
 
+## GitHub user-token lifecycle
+
+GitHub App user access tokens and refresh tokens are encrypted at rest. The session schema records both expiry timestamps. Before returning an access token, the session store checks its expiry using the PostgreSQL clock and refreshes within a two-minute safety window. Refresh exchanges are serialized by locking the session row, preventing concurrent workers from consuming the same rotating refresh token. The newly returned token pair and expiry values are encrypted and persisted in the same database transaction. A missing or expired refresh token, unknown access-token expiry, or provider rejection fails closed.
+
+The provider exchange and local database commit cannot form a distributed transaction. If GitHub rotates a refresh token but the database transaction subsequently fails, the old token may no longer work; the safe recovery is a fresh user authorization rather than reuse of stale credentials. Legacy sessions with a refresh token but no recorded refresh expiry cannot be refreshed.
+
+Logout and token revocation
+
+Local logout is committed before any network call to GitHub. The transaction serializes against refresh using the session row lock, marks the session revoked, clears the encrypted refresh token and both expiry timestamps, and replaces the non-null access-token ciphertext with an encrypted non-credential sentinel. A single-session logout then best-effort calls GitHub's `DELETE /applications/{client_id}/token` endpoint to revoke that user access token. Logout-all locks and sanitizes every active session for the verified GitHub user, then best-effort calls `DELETE /applications/{client_id}/grant` to revoke the user's complete GitHub App authorization and associated tokens. Provider failures never roll back local logout or restore local token material. Migration `0007_sanitize_revoked_sessions` also irreversibly sanitizes credentials left in rows revoked by the older logout implementation; logout-all sanitizes legacy revoked rows for that user as well as currently active sessions. These operations occur after the local transaction commits so database locks are not held across network calls. PostgreSQL tests assert credential cleanup, scope of revocation, and local fail-closed behavior when GitHub returns an error.
+
+
 ## Implementation sequence
 
 1. **Completed:** expose GitHub's immutable numeric repository ID in new Software Genome snapshots.
