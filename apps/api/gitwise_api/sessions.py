@@ -19,7 +19,11 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from gitwise_api.github_oauth import GitHubOAuthClient, GitHubOAuthError
+from gitwise_api.github_oauth import (
+    GitHubOAuthClient,
+    GitHubOAuthConnectError,
+    GitHubOAuthError,
+)
 from gitwise_api.token_crypto import TokenCipher, TokenCryptoError
 
 MAX_TOKEN_LENGTH = 256
@@ -276,6 +280,7 @@ class SessionStore:
         material before the failure is returned to the caller.
         """
         refresh_failed = False
+        revoke_after_refresh_failure = False
         refreshed_access_token: str | None = None
         try:
             async with self._engine.begin() as connection:
@@ -288,8 +293,8 @@ class SessionStore:
                             FROM user_sessions
                             WHERE session_id = :session_id
                               AND revoked_at IS NULL
-                              AND idle_expires_at > now()
-                              AND absolute_expires_at > now()
+                              AND idle_expires_at > clock_timestamp()
+                              AND absolute_expires_at > clock_timestamp()
                             FOR UPDATE
                             """
                         ),
@@ -321,10 +326,15 @@ class SessionStore:
                     tokens = await oauth.refresh_access_token(
                         refresh_token=refresh_token
                     )
+                except GitHubOAuthConnectError:
+                    # A connect-phase failure means the request never reached GitHub.
+                    # Keep the token pair so a later request can safely retry.
+                    refresh_failed = True
                 except GitHubOAuthError:
-                    # A timeout or provider rejection can happen after GitHub has
-                    # consumed the one-time refresh token. Do not leave this session
-                    # retrying a possibly dead credential pair indefinitely.
+                    # A read/write failure or provider rejection can happen after
+                    # GitHub has consumed the one-time refresh token. Revoke the
+                    # local session so callers cannot repeatedly replay a dead pair.
+                    revoke_after_refresh_failure = True
                     await connection.execute(
                         text(
                             """
