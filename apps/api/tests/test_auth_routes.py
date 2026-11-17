@@ -389,6 +389,20 @@ def test_signing_out_everywhere_only_ends_that_users_sessions() -> None:
                 assert response.status_code == 204
                 assert github.revoked_grants == ["ghu_alice_token"]
                 assert github.revoked_tokens == []
+                async with store._engine.connect() as connection:
+                    cleared = (
+                        await connection.execute(
+                            text(
+                                "SELECT count(*), bool_and(revoked_at IS NOT NULL "
+                                "AND encrypted_refresh_token IS NULL "
+                                "AND access_token_expires_at IS NULL "
+                                "AND refresh_token_expires_at IS NULL) "
+                                "FROM user_sessions WHERE github_user_id = 1001"
+                            )
+                        )
+                    ).one()
+                assert cleared[0] == 2
+                assert cleared[1] is True
 
                 assert (await alice.get("/auth/session")).status_code == 401
                 assert (await alice_phone.get("/auth/session")).status_code == 401
