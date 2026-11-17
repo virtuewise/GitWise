@@ -702,7 +702,9 @@ def test_terminal_session_purge_is_bounded_and_respects_retention_window() -> No
                             "WHERE token_hash IN (:recent, :active)"
                         ),
                         {
-                            "recent": hashlib.sha256(revoked_recent.session_token.encode()).digest(),
+                            "recent": hashlib.sha256(
+                                revoked_recent.session_token.encode()
+                            ).digest(),
                             "active": hashlib.sha256(active.session_token.encode()).digest(),
                         },
                     )
