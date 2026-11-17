@@ -151,7 +151,7 @@ def test_refresh_exchange_rotates_both_tokens_and_uses_refresh_grant() -> None:
     "payload",
     [
         {"error": "invalid_grant"},
-        {"access_token": "new", "refresh_token": "old", "expires_in": 28800,
+        {"access_token": "new", "refresh_token": "ghr_old", "expires_in": 28800,
          "refresh_token_expires_in": 15897600, "token_type": "bearer"},
         {"access_token": "new", "refresh_token": "rotated", "expires_in": True,
          "refresh_token_expires_in": 15897600, "token_type": "bearer"},
