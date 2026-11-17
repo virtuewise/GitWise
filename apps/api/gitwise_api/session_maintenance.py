@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sys
 
 from gitwise_api.config import get_settings
 from gitwise_api.sessions import SessionStore
