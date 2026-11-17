@@ -671,7 +671,8 @@ def test_terminal_session_purge_is_bounded_and_respects_retention_window() -> No
                 )
                 await connection.execute(
                     text(
-                        "UPDATE user_sessions SET idle_expires_at = now() - interval '31 days', "
+                        "UPDATE user_sessions SET created_at = now() - interval '32 days', "
+                        "idle_expires_at = now() - interval '31 days', "
                         "absolute_expires_at = now() - interval '31 days' "
                         "WHERE token_hash = :token_hash"
                     ),
