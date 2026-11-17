@@ -514,3 +514,52 @@ def test_provider_refresh_failure_never_returns_the_expired_access_token() -> No
             await store.close()
 
     asyncio.run(exercise())
+
+
+
+def test_session_expiring_during_refresh_fails_closed() -> None:
+    async def exercise() -> None:
+        from gitwise_api.github_oauth import OAuthTokens
+        from gitwise_api.sessions import SessionError
+
+        class SlowOAuth:
+            async def refresh_access_token(self, *, refresh_token: str) -> OAuthTokens:
+                assert refresh_token == REFRESH
+                await asyncio.sleep(1.2)
+                return OAuthTokens(
+                    "ghu_rotated_access",
+                    "ghr_rotated_refresh",
+                    28800,
+                    15897600,
+                )
+
+        store = _store(
+            idle_ttl=__import__("datetime").timedelta(seconds=1),
+            absolute_ttl=__import__("datetime").timedelta(seconds=5),
+        )
+        try:
+            issued = await store.create_session(
+                github_user_id=_user_id(),
+                github_login="expires-during-refresh",
+                access_token=ACCESS,
+                refresh_token=REFRESH,
+                access_token_expires_in=28800,
+                refresh_token_expires_in=15897600,
+            )
+            session = await store.resolve_session(issued.session_token)
+            assert session is not None
+            async with store._engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE user_sessions SET access_token_expires_at = "
+                        "now() + interval '30 seconds' WHERE session_id = :s"
+                    ),
+                    {"s": session.session_id},
+                )
+
+            with pytest.raises(SessionError):
+                await store.access_token(session, SlowOAuth())
+        finally:
+            await store.close()
+
+    asyncio.run(exercise())
