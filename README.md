@@ -68,6 +68,31 @@ Copy `.env.example` to `.env` and configure values as needed. Never commit token
 
 Configure `GITWISE_GITHUB_WEBHOOK_SECRET` with the webhook secret from the GitHub App and configure `GITWISE_DATABASE_URL` with PostgreSQL. `POST /webhooks/github` verifies `X-Hub-Signature-256` against the original raw body, enforces a 1 MB request limit, and records GitHub deliveries with recoverable processing state. It handles `ping`, `installation` (`created`, `deleted`, `suspend`, `unsuspend`), and `installation_repositories` (`added`, `removed`) events. Lifecycle events require `GITWISE_GITHUB_APP_ID`, `GITWISE_GITHUB_APP_PRIVATE_KEY`, `GITWISE_GITHUB_WEBHOOK_SECRET`, and PostgreSQL. Concurrent deliveries receive an in-progress response, failed or expired processing leases can be retried, completed deliveries are acknowledged as duplicates, and conflicting reuse is rejected. Other event types deliberately return `501`. Installation repository additions are verified against GitHub using one-repository, read-scoped tokens and immutable numeric repository IDs. Every installation/repository lifecycle delivery is serialized per installation with a PostgreSQL advisory lock and reconciled against GitHub's current repository list using a short-lived metadata-only token. The grant set is updated in one PostgreSQL transaction, so delayed or out-of-order add/remove events cannot overwrite newer access state; still-selected repositories remain granted and only inaccessible repositories are revoked. Deletion and confirmed suspension revoke all grants for the installation. Installation creation and unsuspension reconcile grants against GitHub's current installation repository listing, obtained with a short-lived metadata-only token; only currently accessible repositories remain granted.
 
+## GitHub App user sessions
+
+GitHub App user access and refresh tokens are encrypted at rest and never returned to browser clients. Refresh exchanges are serialized per session and rotate the encrypted token pair atomically. Logout commits local revocation and clears refresh credentials before attempting upstream revocation: a single-session logout revokes its user access token, while logout-all revokes the user's GitHub App authorization. Upstream revocation is best-effort; local session revocation remains authoritative if GitHub is unavailable. Migration `0007_sanitize_revoked_sessions` also erases recoverable token material left in rows revoked by the earlier logout behavior. PostgreSQL integration tests verify token cleanup, logout-all isolation between users, and fail-closed behavior when provider revocation fails. Authenticated Genome history remains gated on independent review and the remaining authorization/security acceptance criteria.
+
+## OAuth session retention
+
+Terminal session rows are retained for 30 days after local revocation or, for sessions
+that expire naturally, after the first idle/absolute expiry that makes the session unusable.
+This preserves a short operational/audit window without retaining session metadata
+indefinitely. Credential ciphertext is sanitized at revocation; the retention window
+does not extend credential validity or permit session reuse.
+
+Run `python -m gitwise_api.session_maintenance` once daily from the deployment's
+scheduler (for example, a Kubernetes CronJob or systemd timer). The command requires
+`GITWISE_DATABASE_URL` and `GITWISE_TOKEN_ENCRYPTION_KEYS`, deletes at most 500 rows
+per transaction, and loops until the eligible backlog is drained. It uses
+`FOR UPDATE SKIP LOCKED`, so concurrent maintenance workers do not claim the same
+rows and active refresh/logout operations are not blocked by rows they hold. The
+command emits only an aggregate deleted-row count; alert on non-zero exit status,
+and monitor the count/backlog over time. It is safe to rerun after partial failure.
+
+Migration `0008_session_retention_indexes` adds partial indexes for revoked and
+naturally expired sessions. The purge never deletes a session before the 30-day
+terminal-retention window, and never selects a currently active session.
+
 ## GitHub App identity foundation
 
 The GitHub App client authenticates with short-lived RS256 App JWTs, verifies that an installation belongs to the configured App, and can mint a token scoped to one repository. Before returning that token, it checks the installation account, the repository's immutable numeric ID and full name from GitHub's token response, and the explicit contents: read permission. A repository name supplied by an event is never treated as sufficient identity. The lifecycle processor in `github_installation_events.py` verifies signed event identity against the configured App, then confirms added repositories with GitHub before granting access. Deleted/suspended installations have their active grants revoked. Grant reconciliation is transactional and idempotent; delivery completion follows the committed database effects.
@@ -88,7 +113,7 @@ The snapshot store remains separate from the webhook grant lifecycle. Its intern
 
 ## GitHub App user sign-in
 
-`GET /auth/github/login` starts the GitHub App authorization-code flow with PKCE and a single-use `state` that is also bound to the browser by a short-lived `HttpOnly` cookie. `GET /auth/github/callback` consumes the state atomically, exchanges the code on the server, asks GitHub to verify the user, and creates a server-side session. The browser only receives an opaque `HttpOnly`, `Secure`, `SameSite=Lax` session cookie and a readable CSRF cookie; GitHub tokens never leave the server and are stored encrypted (`GITWISE_TOKEN_ENCRYPTION_KEYS`, newest key first, so keys can be rotated). Sign-in always returns to `GITWISE_PUBLIC_BASE_URL`; the destination is never taken from the request. Sessions have idle and absolute expiry. `POST /auth/session/rotate`, `/auth/logout` and `/auth/logout/all` require the `X-CSRF-Token` header. Identity comes only from the session, never from request parameters. Sign-in is disabled unless the database, token keys, GitHub App client credentials and public base URL are all configured. Historical Genome retrieval remains unavailable until the authenticated endpoint and its authorization tests land.
+`GET /auth/github/login` starts the GitHub App authorization-code flow with PKCE and a single-use `state` that is also bound to the browser by a short-lived `HttpOnly` cookie. `GET /auth/github/callback` consumes the state atomically, exchanges the code on the server, asks GitHub to verify the user, and creates a server-side session. The browser only receives an opaque `HttpOnly`, `Secure`, `SameSite=Lax` session cookie and a readable CSRF cookie; GitHub tokens never leave the server and are stored encrypted (`GITWISE_TOKEN_ENCRYPTION_KEYS`, newest key first, so keys can be rotated). Sign-in always returns to `GITWISE_PUBLIC_BASE_URL`; the destination is never taken from the request. Sessions have idle and absolute expiry. The session store refreshes expiring GitHub access tokens server-side, serializes refresh-token exchanges with a PostgreSQL row lock, and persists the newly rotated encrypted token pair and expiry timestamps together. Expired refresh credentials or provider failures fail closed; users may need to authorize again. Legacy sessions without a known refresh-token expiry are not refreshed. `POST /auth/session/rotate`, `/auth/logout` and `/auth/logout/all` require the `X-CSRF-Token` header. Identity comes only from the session, never from request parameters. Sign-in is disabled unless the database, token keys, GitHub App client credentials and public base URL are all configured. Historical Genome retrieval remains unavailable until the authenticated endpoint and its authorization tests land.
 
 ## Security
 
