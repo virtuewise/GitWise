@@ -15,7 +15,7 @@ def upgrade() -> None:
     op.execute(
         """
         UPDATE user_sessions
-        SET encrypted_access_token = 'revoked-session',
+        SET encrypted_access_token = convert_to('revoked-session', 'UTF8'),
             encrypted_refresh_token = NULL,
             access_token_expires_at = NULL,
             refresh_token_expires_at = NULL
