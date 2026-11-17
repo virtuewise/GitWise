@@ -39,8 +39,19 @@ class FakeGitHub:
     def __init__(self) -> None:
         self.verifiers: list[str] = []
         self.exchange_error = False
+        self.revoked_tokens: list[str] = []
+        self.revoked_grants: list[str] = []
 
     def oauth_handler(self, request: httpx.Request) -> httpx.Response:
+        if request.method == "DELETE":
+            access_token = request.read().decode()
+            import json
+            token = json.loads(access_token)["access_token"]
+            if request.url.path.endswith("/grant"):
+                self.revoked_grants.append(token)
+            else:
+                self.revoked_tokens.append(token)
+            return httpx.Response(204)
         form = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
         self.verifiers.append(form["code_verifier"])
         if self.exchange_error or form["code"] not in USERS:
@@ -281,7 +292,8 @@ def test_failed_code_exchange_creates_no_session() -> None:
 
 def test_state_changing_requests_need_a_matching_csrf_token_and_logout_ends_the_session() -> None:
     async def exercise() -> None:
-        store = _install(FakeGitHub())
+        github = FakeGitHub()
+        store = _install(github)
         try:
             async with _browser() as browser:
                 callback, _ = await _sign_in(browser, "code-alice")
@@ -295,6 +307,8 @@ def test_state_changing_requests_need_a_matching_csrf_token_and_logout_ends_the_
 
                 done = await browser.post("/auth/logout", headers={"x-csrf-token": csrf})
                 assert done.status_code == 204
+                assert github.revoked_tokens == ["ghu_alice_token"]
+                assert github.revoked_grants == []
                 assert (await browser.get("/auth/session")).status_code == 401
 
             # The old cookie is dead server-side, not merely deleted from the browser.
