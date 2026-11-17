@@ -12,6 +12,10 @@ class GitHubOAuthError(RuntimeError):
     """The authorization code could not be exchanged. Never carries token material."""
 
 
+class GitHubOAuthConnectError(GitHubOAuthError):
+    """A connection could not be established; the refresh request was not sent."""
+
+
 @dataclass(frozen=True)
 class OAuthTokens:
     access_token: str = field(repr=False)
@@ -136,7 +140,15 @@ class GitHubOAuthClient:
                 },
                 headers={"Accept": "application/json"},
             )
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            # No HTTP request reached GitHub, so the one-time refresh token is
+            # still safe to retry on the next request.
+            raise GitHubOAuthConnectError(
+                "GitHub authorization could not be refreshed."
+            ) from None
         except httpx.HTTPError:
+            # Read/write/protocol failures are ambiguous: GitHub may already have
+            # rotated the one-time token. The session layer must revoke locally.
             raise GitHubOAuthError(
                 "GitHub authorization could not be refreshed."
             ) from None
