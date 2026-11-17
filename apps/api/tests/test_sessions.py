@@ -300,3 +300,147 @@ def test_rejects_unverified_identity_inputs() -> None:
             await store.close()
 
     asyncio.run(exercise())
+
+
+
+def test_expired_access_token_is_refreshed_and_rotated_atomically() -> None:
+    async def exercise() -> None:
+        from datetime import timedelta
+
+        from gitwise_api.github_oauth import OAuthTokens
+
+        class FakeOAuth:
+            calls = 0
+
+            async def refresh_access_token(self, *, refresh_token: str) -> OAuthTokens:
+                self.calls += 1
+                assert refresh_token == REFRESH
+                await asyncio.sleep(0.05)
+                return OAuthTokens(
+                    "ghu_rotated_access",
+                    "ghr_rotated_refresh",
+                    28800,
+                    15897600,
+                )
+
+        store = _store()
+        fake = FakeOAuth()
+        try:
+            issued = await store.create_session(
+                github_user_id=_user_id(),
+                github_login="refreshable",
+                access_token=ACCESS,
+                refresh_token=REFRESH,
+                access_token_expires_in=28800,
+                refresh_token_expires_in=15897600,
+            )
+            session = await store.resolve_session(issued.session_token)
+            assert session is not None
+            async with store._engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE user_sessions SET access_token_expires_at = "
+                        "now() + interval '30 seconds' WHERE session_id = :s"
+                    ),
+                    {"s": session.session_id},
+                )
+
+            results = await asyncio.gather(
+                *(store.access_token(session, fake) for _ in range(4))
+            )
+            assert results == ["ghu_rotated_access"] * 4
+            assert fake.calls == 1
+
+            async with store._engine.connect() as connection:
+                row = (
+                    await connection.execute(
+                        text(
+                            "SELECT encrypted_access_token, encrypted_refresh_token, "
+                            "access_token_expires_at, refresh_token_expires_at "
+                            "FROM user_sessions WHERE session_id = :s"
+                        ),
+                        {"s": session.session_id},
+                    )
+                ).one()
+            assert store._cipher.decrypt(row[0]) == "ghu_rotated_access"
+            assert store._cipher.decrypt(row[1]) == "ghr_rotated_refresh"
+            assert row[2] > row[3] - timedelta(days=180)
+
+        finally:
+            await store.close()
+
+    asyncio.run(exercise())
+
+
+def test_expired_refresh_token_fails_closed_without_provider_call() -> None:
+    async def exercise() -> None:
+        from gitwise_api.sessions import SessionError
+
+        class NeverCalled:
+            async def refresh_access_token(self, *, refresh_token: str):
+                raise AssertionError("expired refresh token must not be sent to GitHub")
+
+        store = _store()
+        try:
+            issued = await store.create_session(
+                github_user_id=_user_id(),
+                github_login="expired-refresh",
+                access_token=ACCESS,
+                refresh_token=REFRESH,
+                access_token_expires_in=28800,
+                refresh_token_expires_in=15897600,
+            )
+            session = await store.resolve_session(issued.session_token)
+            assert session is not None
+            async with store._engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE user_sessions SET access_token_expires_at = now() - "
+                        "interval '1 second', refresh_token_expires_at = now() - "
+                        "interval '1 second' WHERE session_id = :s"
+                    ),
+                    {"s": session.session_id},
+                )
+            with pytest.raises(SessionError):
+                await store.access_token(session, NeverCalled())
+        finally:
+            await store.close()
+
+    asyncio.run(exercise())
+
+
+def test_revoked_session_cannot_refresh() -> None:
+    async def exercise() -> None:
+        from gitwise_api.sessions import SessionError
+
+        class NeverCalled:
+            async def refresh_access_token(self, *, refresh_token: str):
+                raise AssertionError("revoked session must not refresh")
+
+        store = _store()
+        try:
+            issued = await store.create_session(
+                github_user_id=_user_id(),
+                github_login="revoked",
+                access_token=ACCESS,
+                refresh_token=REFRESH,
+                access_token_expires_in=28800,
+                refresh_token_expires_in=15897600,
+            )
+            session = await store.resolve_session(issued.session_token)
+            assert session is not None
+            async with store._engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE user_sessions SET revoked_at = now(), "
+                        "access_token_expires_at = now() - interval '1 second' "
+                        "WHERE session_id = :s"
+                    ),
+                    {"s": session.session_id},
+                )
+            with pytest.raises(SessionError):
+                await store.access_token(session, NeverCalled())
+        finally:
+            await store.close()
+
+    asyncio.run(exercise())
